@@ -639,3 +639,189 @@ docker虚悬镜像：仓库名、标签都是<none>的镜像，俗称虚悬镜�
 ubuntu比较小，本次演示用ubuntu演示
 
 ### 1、新建+启动容器
+
+> docker run [OPTIONS] `IMAGE` [COMMAND] [ARG...]
+
+OPTIONS说明（常用）：有些是一个减号，有些是两个减号
+
+- --name="容器新名字"：为容器指定一个名称；
+
+- -d: 后台运行容器并返回容器ID，也即启动守护式容器(后台运行)；
+
+- `-i：以交互模式运行容器，通常与 -t 同时使用；`
+
+- `-t：为容器重新分配一个伪输入终端，通常与 -i 同时使用；也即启动交互式容器(前台有伪终端，等待交互)；`
+
+- -P: `随机`端口映射，大写P
+
+- -p: `指定`端口映射，小写p
+
+  <img src="README.assets/image-20220515231340392.png" alt="image-20220515231340392" style="zoom:80%;" /> 
+
+启动交互式容器(前台命令行)
+
+```shell
+# 使用镜像ubuntu:latest以交互模式启动一个容器,在容器内执行/bin/bash命令。
+[root@localhost ~]# docker run -it ubuntu /bin/bash
+root@413096c04b0a:/# 
+```
+
+参数说明：
+
+- -i: 交互式操作。
+- -t: 终端。
+- ubuntu: ubuntu镜像。
+- /bin/bash：放在镜像名后的是命令，这里我们希望有个交互式 Shell，因此用的是 /bin/bash。
+  要退出终端，直接输入 exit:
+
+- 
+
+### 2、列出当前所有正在运行的容器
+
+>  docker ps [OPTIONS]
+
+```shell
+[root@localhost ~]# docker ps
+CONTAINER ID   IMAGE     COMMAND       CREATED         STATUS         PORTS     NAMES
+413096c04b0a   ubuntu    "/bin/bash"   5 minutes ago   Up 5 minutes             hopeful_mayer
+```
+
+再启动一个终端,启动一个容器并指定容器名称：
+
+```shell
+[root@localhost ~]# docker run -it --name=myu01 ubuntu bash
+root@066f37b889de:/# 
+```
+
+查看正常运行的容器：
+
+```shell
+[root@localhost ~]# docker ps
+CONTAINER ID   IMAGE     COMMAND       CREATED          STATUS          PORTS     NAMES
+066f37b889de   ubuntu    "bash"        31 seconds ago   Up 30 seconds             myu01
+413096c04b0a   ubuntu    "/bin/bash"   8 minutes ago    Up 8 minutes              hopeful_mayer
+```
+
+OPTIONS说明（常用）：
+
+- -a :列出当前所有**正在运行**的容器+**历史上运行过**的
+
+  ```shell
+  [root@localhost ~]# docker ps -a
+  CONTAINER ID   IMAGE         COMMAND       CREATED          STATUS                      PORTS     NAMES
+  066f37b889de   ubuntu        "bash"        2 minutes ago    Up 2 minutes                          myu01
+  413096c04b0a   ubuntu        "/bin/bash"   10 minutes ago   Exited (0) 13 seconds ago             hopeful_mayer
+  2cb88e07b8e8   hello-world   "/hello"      3 days ago       Exited (0) 3 days ago                 optimistic_hertz
+  47fce1b3b8ae   hello-world   "/hello"      3 days ago       Exited (0) 3 days ago                 compassionate_nightingale
+  ```
+
+- -l :显示最近创建的一个容器。
+
+  ```shell
+  [root@localhost ~]# docker ps -l
+  CONTAINER ID   IMAGE     COMMAND   CREATED         STATUS         PORTS     NAMES
+  066f37b889de   ubuntu    "bash"    3 minutes ago   Up 3 minutes             myu01
+  ```
+
+- -n：显示最近n个创建的容器。
+
+  ```shell
+  [root@localhost ~]# docker ps -n 2
+  CONTAINER ID   IMAGE     COMMAND       CREATED         STATUS         PORTS     NAMES
+  292fdc8c4a43   ubuntu    "/bin/bash"   2 minutes ago   Up 2 minutes             trusting_gould
+  066f37b889de   ubuntu    "bash"        7 minutes ago   Up 7 minutes             myu01
+  ```
+
+- **-q :静默模式，只显示容器编号。**
+
+  ```shell
+  [root@localhost ~]# docker ps -q
+  292fdc8c4a43
+  066f37b889de
+  ```
+
+### 3、退出容器
+
+两种退出方式：
+
+- exit：run进去容器，exit退出，容器停止
+
+  ```shell
+  # 启动两个容器
+  [root@localhost ~]# docker ps
+  CONTAINER ID   IMAGE     COMMAND       CREATED          STATUS          PORTS     NAMES
+  ed78bf298177   ubuntu    "/bin/bash"   17 seconds ago   Up 17 seconds             festive_chandrasekhar
+  d5bf83ad5c63   ubuntu    "/bin/bash"   28 seconds ago   Up 28 seconds             pedantic_pasteur
+  root@ed78bf298177:/# exit
+  exit
+  [root@localhost ~]# docker ps
+  CONTAINER ID   IMAGE     COMMAND       CREATED         STATUS         PORTS     NAMES
+  d5bf83ad5c63   ubuntu    "/bin/bash"   2 minutes ago   Up 2 minutes             pedantic_pasteur
+  ```
+
+- ctrl+p+q：run进去容器，ctrl+p+q退出，`容器不停止`
+
+### 4、启动已停止运行的容器
+
+> docker start 容器ID或者容器名
+
+```shell
+[root@localhost ~]# docker start ed78bf298177
+ed78bf298177
+[root@localhost ~]# docker ps
+CONTAINER ID   IMAGE     COMMAND       CREATED         STATUS         PORTS     NAMES
+ed78bf298177   ubuntu    "/bin/bash"   7 minutes ago   Up 6 seconds             festive_chandrasekhar
+d5bf83ad5c63   ubuntu    "/bin/bash"   7 minutes ago   Up 7 minutes             pedantic_pasteur
+```
+
+### 5、进入正在运行的容器
+
+> docker exec -it 容器名或id /bin/bash
+
+```shell
+[root@localhost ~]# docker exec -it d5bf83ad5c63 /bin/bash
+root@d5bf83ad5c63:/# 
+```
+
+### 6、重启容器
+
+> docker restart 容器ID或者容器名
+
+### 7、停止容器
+
+> docker stop 容器ID或者容器名
+
+### 8、强制停止容器
+
+> docker kill 容器ID或容器名
+
+### 9、删除已停止的容器
+
+> docker rm [-f] 容器ID
+
+-f：强制删除
+
+- `一次性删除多个容器实例`
+
+  > docker rm -f $(docker ps -a -q)
+
+  > docker ps -a -q | xargs docker rm
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
