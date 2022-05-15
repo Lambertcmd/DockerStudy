@@ -446,13 +446,196 @@ Docker是一个Client-Server结构的系统，Docker守护进程运行在主机�
    [root@localhost ~]# docker 具体命令 --help
    ```
 
-   
 
+docker命令套用：docker [OPTIONS] COMMAND
 
+## 2、镜像命令
 
+### 2-1、docker images 
 
+> 功能：列出本地主机上的镜像
 
+> docker images [OPTIONS]
 
+```shell
+[root@localhost ~]# docker images
+REPOSITORY    TAG          IMAGE ID       CREATED         SIZE
+hello-world   latest       feb5d9fea6a5   7 months ago    13.3kB
+rabbitmq      management   246db2517862   11 months ago   186MB
+```
 
+各个选项说明:
 
+- REPOSITORY：表示镜像的仓库源
+- TAG：镜像的标签版本号
+- IMAGE ID：镜像ID
+- CREATED：镜像创建时间
+- SIZE：镜像大小
 
+同一仓库源可以有多个TAG版本，代表这个仓库源的不同个版本，我们使用 REPOSITORY:TAG 来定义不同的镜像。
+
+如果你不指定一个镜像的版本标签，例如你只使用 ubuntu，docker 将默认使用 ubuntu:latest 镜像
+
+OPTIONS说明：
+
+- -a :列出本地所有的镜像（含历史映像层）
+
+  ```shell
+  [root@localhost ~]# docker images -a
+  REPOSITORY    TAG          IMAGE ID       CREATED         SIZE
+  hello-world   latest       feb5d9fea6a5   7 months ago    13.3kB
+  rabbitmq      management   246db2517862   11 months ago   186MB
+  ```
+
+- -q :只显示镜像ID。
+
+  ```shell
+  [root@localhost ~]# docker images -q
+  feb5d9fea6a5
+  246db2517862
+  ```
+
+### 2-2、docker search
+
+> 功能：镜像仓库查询镜像
+
+镜像仓库：https://hub.docker.com
+
+命令：
+
+> docker search [OPTIONS] 镜像名字
+
+```shell
+[root@localhost ~]# docker search redis
+NAME                                               DESCRIPTION                                     STARS     OFFICIAL   AUTOMATED
+redis                                              Redis is an open source key-value store that…   10924     [OK]       
+bitnami/redis                                      Bitnami Redis Docker Image                      217                  [OK]
+bitnami/redis-sentinel                             Bitnami Docker Image for Redis Sentinel         36                   [OK]
+bitnami/redis-cluster                                                                              31                   
+circleci/redis                                     CircleCI images for Redis                       12                   [OK]
+...
+```
+
+各个选项说明:
+
+- NAME：镜像名称
+- DESCRIPTION：镜像说明
+- STARS：点赞数量
+- OFFICIAL：是否是官方的
+- AUTOMATED：是否是自动构建的
+
+OPTIONS说明：
+
+- --limit : 只列出N个镜像，默认25个
+
+  ```shell
+  [root@localhost ~]# docker search --limit 1 hello-world
+  NAME          DESCRIPTION                                     STARS     OFFICIAL   AUTOMATED
+  hello-world   Hello World! (an example of minimal Dockeriz…   1738      [OK]
+  ```
+
+### 2-3、docker pull
+
+> 功能：下载镜像
+
+> docker pull 镜像名字[:TAG]
+
+没有TAG默认最新版 == docker pull 镜像名字:latest
+
+```shell
+[root@localhost ~]# docker pull redis
+Using default tag: latest
+latest: Pulling from library/redis
+....
+Digest: sha256:db485f2e245b5b3329fdc7eff4eb00f913e09d8feb9ca720788059fdc2ed8339
+Status: Downloaded newer image for redis:latest
+docker.io/library/redis:latest
+[root@localhost ~]# docker images
+REPOSITORY    TAG          IMAGE ID       CREATED         SIZE
+redis         latest       7614ae9453d1   4 months ago    113MB
+hello-world   latest       feb5d9fea6a5   7 months ago    13.3kB
+rabbitmq      management   246db2517862   11 months ago   186MB
+```
+
+### 2-4、docker system df
+
+> 功能：查看镜像/容器/数据卷所占的空间
+
+```shell
+[root@localhost ~]# docker system df
+TYPE            TOTAL     ACTIVE    SIZE      RECLAIMABLE
+Images          4         2         371.8MB   185.5MB (49%)
+Containers      3         0         567B      567B (100%)
+Local Volumes   2         1         507.7MB   0B (0%)
+Build Cache     0         0         0B        0B
+```
+
+### 2-5、docker rmi
+
+> 功能：删除镜像
+
+- 删除单个
+
+  > docker rmi -f 镜像ID
+
+  ```shell
+  [root@localhost ~]# docker rmi feb5d9fea6a5
+  Error response from daemon: conflict: unable to delete feb5d9fea6a5 (must be forced) - image is being used by stopped container b0dfb628353c #镜像被容器使用中 需要-f强制删除
+  [root@localhost ~]# docker rmi -f feb5d9fea6a5
+  Untagged: hello-world:latest
+  Untagged: hello-world@sha256:2498fce14358aa50ead0cc6c19990fc6ff866ce72aeb5546e1d59caac3d0d60f
+  Deleted: sha256:feb5d9fea6a5e9606aa995e879d862b825965ba48de054caab5ef356dc6b3412
+  [root@localhost ~]# docker images
+  REPOSITORY   TAG          IMAGE ID       CREATED         SIZE
+  redis        latest       7614ae9453d1   4 months ago    113MB
+  ubuntu       latest       ba6acccedd29   7 months ago    72.8MB
+  rabbitmq     management   246db2517862   11 months ago   186MB
+  ```
+
+- 删除多个
+
+  > docker rmi -f 镜像ID1 镜像ID2...
+
+  ```shell
+  [root@localhost ~]# docker rmi -f feb5d9fea6a5 ba6acccedd29
+  Untagged: hello-world:latest
+  Untagged: hello-world@sha256:2498fce14358aa50ead0cc6c19990fc6ff866ce72aeb5546e1d59caac3d0d60f
+  Deleted: sha256:feb5d9fea6a5e9606aa995e879d862b825965ba48de054caab5ef356dc6b3412
+  Untagged: ubuntu:latest
+  Untagged: ubuntu@sha256:626ffe58f6e7566e00254b638eb7e0f3b11d4da9675088f4781a50ae288f3322
+  Deleted: sha256:ba6acccedd2923aee4c2acc6a23780b14ed4b8a5fa4e14e252a23b846df9b6c1
+  Deleted: sha256:9f54eef412758095c8079ac465d494a2872e02e90bf1fb5f12a1641c0d1bb78b
+  ```
+
+- 删除全部
+
+  > docker rmi -f $(docker images -qa)
+
+  ```shell
+  [root@localhost ~]# docker rmi -f $(docker images -qa)
+  # $(docker images -qa)内获取到的所有镜像id
+  ```
+
+### 2-6、docker虚悬镜像
+
+docker虚悬镜像：仓库名、标签都是<none>的镜像，俗称虚悬镜像dangling image
+
+<img src="README.assets/image-20220515171529676.png" alt="image-20220515171529676" style="zoom:80%;" />
+
+虚悬镜像建议删除，否则docker部署可能出问题
+
+## 3、容器命令
+
+`有镜像才能创建容器，这是根本前提(下载一个CentOS或者ubuntu镜像演示)`
+
+<img src="README.assets/image-20220515172837702.png" alt="image-20220515172837702" style="zoom:80%;" />
+
+```shell
+[root@localhost ~]# docker pull centos 
+/
+[root@localhost ~]# docker pull ubuntu
+```
+
+ubuntu比较小，本次演示用ubuntu演示
+
+### 1、新建+启动容器
