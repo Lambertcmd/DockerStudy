@@ -807,21 +807,386 @@ root@d5bf83ad5c63:/#
 
   > docker ps -a -q | xargs docker rm
 
+### 10、重要指令
 
+> 有镜像才能创建容器，这是根本前提(下载一个Redis6.0.8镜像演示)
 
+#### 10-1、启动守护式容器(后台服务器)
 
+`在大部分的场景下，我们希望 docker 的服务是在后台运行的，我们可以过 -d 指定容器的后台运行模式。`
 
+> docker run -d 容器名
 
+```shell
+#使用镜像ubuntu:latest以后台模式启动一个容器
+docker run -d ubuntu
+[root@localhost ~]# docker run -d ubuntu
+d6535376e760cb6d113cdb6007b77894551f5b8f484212b2e154af684301205a
+[root@localhost ~]# docker ps -a
+CONTAINER ID   IMAGE                 COMMAND                  CREATED             STATUS                         PORTS      NAMES
+d6535376e760   ubuntu                "bash"                   30 seconds ago      Exited (0) 29 seconds ago                 ecstatic_banach
+```
 
+问题：然后docker ps -a 进行查看, 会发现容器已经退出
 
+很重要的要说明的一点: `Docker容器后台运行,就必须有一个前台进程`.容器运行的命令如果不是那些一直挂起的命令（比如运行top，tail），就是会自动退出的。
 
+这个是docker的机制问题,比如你的web容器,我们以nginx为例，正常情况下,我们配置启动服务只需要启动响应的service即可。例如service nginx start但是,这样做,nginx为后台进程模式运行,就导致docker前台没有运行的应用,这样的容器后台启动后,会立即自杀因为他觉得他没事可做了.所以，最佳的解决方案是,`将你要运行的程序以前台进程的形式运行，常见就是命令行模式，表示我还有交互操作`
 
+redis 前后台启动演示case
 
+- 前台交互式启动
 
+  <img src="README.assets/image-20220516122957456.png" alt="image-20220516122957456" style="zoom:67%;" /> 
 
+- 后台守护式启动
 
+  ```shell
+  [root@localhost ~]# docker run -d redis:6.0.8
+  5e954a955149517ae9d5d21b8f527e0e7fff9a583cfc743ce6b290c6d0f2f68d
+  [root@localhost ~]# docker ps
+  CONTAINER ID   IMAGE         COMMAND                  CREATED          STATUS          PORTS      NAMES
+  5e954a955149   redis:6.0.8   "docker-entrypoint.s…"   3 seconds ago    Up 2 seconds    6379/tcp   compassionate_shockley
+  7db84571e936   redis:6.0.8   "docker-entrypoint.s…"   56 seconds ago   Up 55 seconds   6379/tcp   suspicious_faraday
+  ```
 
+#### 10-2、查看容器日志
 
+> docker logs 容器ID
 
+```shell
+[root@localhost ~]# docker logs 5e954a955149
+1:C 16 May 2022 04:30:41.141 # oO0OoO0OoO0Oo Redis is starting oO0OoO0OoO0Oo
+1:C 16 May 2022 04:30:41.141 # Redis version=6.0.8, bits=64, commit=00000000, modified=0, pid=1, just started
+1:C 16 May 2022 04:30:41.141 # Warning: no config file specified, using the default config. In order to specify a config file use redis-server /path/to/redis.conf
+1:M 16 May 2022 04:30:41.143 * Running mode=standalone, port=6379.
+1:M 16 May 2022 04:30:41.143 # WARNING: The TCP backlog setting of 511 cannot be enforced because /proc/sys/net/core/somaxconn is set to the lower value of 128.
+```
 
+#### 10-3、查看容器内运行的进程
+
+> docker top 容器ID
+
+```shell
+[root@localhost ~]# docker top 5e954a955149
+UID                 PID                 PPID                C                   STIME               TTY                 TIME                
+polkitd             5506                5488                0                   12:30               ?                 00:00:00 
+
+CMD
+
+redis-server *:6379
+```
+
+#### 10-4、查看容器内部细节
+
+> docker inspect 容器ID
+
+#### 10-5、`进入正在运行的容器并以命令行交互`
+
+> docker exec -it 容器ID /bin/bash
+
+```shell
+[root@localhost ~]# docker exec -it 5e954a955149 /bin/bash
+root@5e954a955149:/data#
+```
+
+> docker attach 容器ID：重新进入
+
+```shell
+[root@localhost ~]# docker attach 7eb34795d9b4
+root@7eb34795d9b4:/# 
+```
+
+上述两个区别
+
+- attach 直接进入容器启动命令的终端，不会启动新的进程。`用exit退出，会导致容器的停止`
+- exec 是在容器中打开新的终端，并且可以启动新的进程。`用exit退出，不会导致容器的停止`
+
+推荐大家使用 docker exec 命令，因为退出容器终端，不会导致容器的停止。
+
+用之前的redis容器实例进入试试,进入redis服务
+
+- `docker exec -it 容器ID /bin/bash`
+
+  ```shell
+  [root@localhost ~]# docker ps
+  CONTAINER ID   IMAGE         COMMAND                  CREATED         STATUS        PORTS      NAMES
+  8e7a46b7c9a9   redis:6.0.8   "docker-entrypoint.s…"   2 seconds ago   Up 1 second   6379/tcp   compassionate_diffie
+  [root@localhost ~]# docker exec -it 8e7a46b7c9a9 /bin/bash
+  root@8e7a46b7c9a9:/data#
+  ```
+
+- `docker exec -it 容器ID redis-cli`
+
+  ```shell
+  [root@localhost ~]# docker ps
+  CONTAINER ID   IMAGE         COMMAND                  CREATED              STATUS              PORTS      NAMES
+  8e7a46b7c9a9   redis:6.0.8   "docker-entrypoint.s…"   About a minute ago   Up About a minute   6379/tcp   compassionate_diffie
+  [root@localhost ~]# docker exec -it 8e7a46b7c9a9 redis-cli
+  127.0.0.1:6379> 
+  ```
+
+`一般用-d后台启动的程序，再用exec进入对应容器实例`
+
+#### 10-6、从容器内拷贝文件到主机上
+
+有时容器需要被删除前，将文件拷贝到主机上
+
+> docker cp  容器ID:容器内路径 目的主机路径
+
+```shell
+root@f6a363b4fe2f:/test# touch a.txt
+root@f6a363b4fe2f:/test# ls
+a.txt
+
+[root@localhost ~]# docker cp f6a363b4fe2f:/test/a.txt /test/
+[root@localhost ~]# cd /test
+[root@localhost test]# ls
+a.txt
+```
+
+#### 10-7、导入和导出容器
+
+> export 导出容器的内容留作为一个tar归档文件[对应import命令]
+>
+> import 从tar包中的内容创建一个新的文件系统再导入为镜像[对应export]
+>
+
+案例：
+
+> docker export 容器ID > 文件名.tar
+
+```shell
+[root@localhost ~]# docker ps
+CONTAINER ID   IMAGE         COMMAND                  CREATED             STATUS             PORTS      NAMES
+f6a363b4fe2f   ubuntu        "/bin/bash"              About an hour ago   Up About an hour              admiring_albattani
+8e7a46b7c9a9   redis:6.0.8   "docker-entrypoint.s…"   About an hour ago   Up About an hour   6379/tcp   compassionate_diffie
+[root@localhost ~]# docker export f6a363b4fe2f > abcd.tar
+[root@localhost ~]# ls
+abcd.tar         appendonly.aof  dump.rdb              公共  视频  文档  音乐
+anaconda-ks.cfg  dump6379.rdb    initial-setup-ks.cfg  模板  图片  下载  桌面
+```
+
+> cat 文件名.tar | docker import - 镜像用户/镜像名:镜像版本号
+
+```shell
+[root@localhost test]# cat abcd.tar | docker import - geek/ubuntu:lastest
+sha256:0e6cd5cb2cb07ca5a85f51c94bcde0ab547f91e62df4acc97ef6e95bfd87ffd9
+[root@localhost test]# docker images
+REPOSITORY    TAG          IMAGE ID       CREATED          SIZE
+geek/ubuntu   lastest      0e6cd5cb2cb0   25 seconds ago   72.8MB
+redis         latest       7614ae9453d1   4 months ago     113MB
+ubuntu        latest       ba6acccedd29   7 months ago     72.8MB
+[root@localhost test]# docker run -it 0e6cd5cb2cb0 /bin/bash
+root@7903531596a3:/# cd test
+root@7903531596a3:/test# ls
+a.txt
+```
+
+# 四、Docker镜像
+
+## 1、镜像
+
+### 1-1、镜像的概念
+
+> 镜像是一种轻量级、可执行的独立软件包，它包含运行某个软件所需的所有内容，我们把应用程序和配置依赖打包好形成一个可交付的运行环境(包括代码、运行时需要的库、环境变量和配置文件等)，这个打包好的运行环境就是image镜像文件。
+>
+> 只有通过这个镜像文件才能生成Docker容器实例(类似Java中new出来一个对象)。
+
+### 1-2、分层的镜像
+
+> 以我们的pull为例，在下载的过程中我们可以看到docker的镜像好像是在一层一层的在下载
+>
+
+<img src="README.assets/image-20220516142931015.png" alt="image-20220516142931015" style="zoom:80%;" /> 
+
+### 1-3、UnionFS（联合文件系统）
+
+UnionFS（联合文件系统）：Union文件系统（UnionFS）是一种分层、轻量级并且高性能的文件系统，它支持`对文件系统的修改作为一次提交来一层层的叠加`，同时可以将不同目录挂载到同一个虚拟文件系统下(unite several directories into a single virtual filesystem)。Union 文件系统是 Docker 镜像的基础。`镜像可以通过分层来进行继承`，基于基础镜像（没有父镜像），可以制作各种具体的应用镜像。
+
+特性：一次同时加载多个文件系统，但从外面看起来，只能看到一个文件系统，联合加载会把各层文件系统叠加起来，这样最终的文件系统会包含所有底层的文件和目录
+
+### 1-4、Docker镜像加载原理
+
+docker的镜像实际上由一层一层的文件系统组成，这种层级的文件系统UnionFS。
+bootfs(boot file system)主要包含bootloader和kernel, bootloader主要是引导加载kernel, Linux刚启动时会加载bootfs文件系统，`在Docker镜像的最底层是引导文件系统bootfs`。这一层与我们典型的Linux/Unix系统是一样的，包含boot加载器和内核。当boot加载完成之后整个内核就都在内存中了，此时内存的使用权已由bootfs转交给内核，此时系统也会卸载bootfs。
+
+rootfs (root file system) ，在bootfs之上。包含的就是典型 Linux 系统中的 /dev, /proc, /bin, /etc 等标准目录和文件。rootfs就是各种不同的操作系统发行版，比如Ubuntu，Centos等等。 
+
+<img src="README.assets/image-20220516164356781.png" alt="image-20220516164356781" style="zoom: 67%;" /> 
+
+> 平时我们安装进虚拟机的CentOS都是好几个G，为什么docker这里才200M？？
+
+对于一个精简的OS，rootfs可以很小，只需要包括最基本的命令、工具和程序库就可以了，因为底层直接用Host的kernel，自己只需要提供 rootfs 就行了。由此可见对于不同的linux发行版, bootfs基本是一致的, rootfs会有差别, 因此不同的发行版可以公用bootfs。
+
+### 1-5、为什么 Docker 镜像要采用这种分层结构
+
+镜像分层最大的一个好处就是共享资源，方便复制迁移，就是为了**复用**。
+
+比如说有多个镜像都从相同的 base 镜像构建而来，那么 Docker Host 只需在磁盘上保存一份 base 镜像；
+同时内存中也只需加载一份 base 镜像，就可以为所有容器服务了。而且镜像的每一层都可以被共享。
+
+## 2、重点理解
+
+> `Docker镜像层都是只读的，容器层是可写的`
+
+当容器启动时，一个新的可写层被加载到镜像的顶部。这一层通常被称作“容器层”，“容器层”之下的都叫“镜像层”。
+
+所有对容器的改动 - 无论添加、删除、还是修改文件都只会发生在容器层中。只有容器层是可写的，容器层下面的所有镜像层都是只读的。
+
+<img src="README.assets/image-20220516165101799.png" alt="image-20220516165101799" style="zoom:67%;" /> 
+
+## 3、Docker镜像commit操作案例
+
+`docker commit提交容器副本使之成为一个新的镜像`
+
+> docker commit -m="提交的描述信息" -a="作者" 容器ID 要创建的目标镜像名:[标签名]
+
+案例演示ubuntu安装vim
+
+1. 从Hub上下载ubuntu镜像到本地并成功运行
+
+2. `原始的默认Ubuntu镜像是不带着vim命令的`
+
+   ```shell
+   root@96a782ba963c:/# vim a.txt
+   bash: vim: command not found
+   ```
+
+3. 外网连通的情况下，安装vim
+
+   ```shell
+   #更新包管理工具
+   root@96a782ba963c:/# apt-get update
+   ...
+   Fetched 22.1 MB in 11s (1976 kB/s)                                                                                           
+   Reading package lists... Done
+   # 安装vim
+   root@96a782ba963c:/# apt-get -y install vim
+   ...
+   root@96a782ba963c:/# vim a.txt
+   ```
+
+4. 安装完成后，commit我们自己的新镜像
+
+   ```shell
+   [root@localhost ~]# docker commit -m="add vim cmd" -a="lambert" 96a782ba963c geek/myubuntu:1.1
+   sha256:f304cdbd6b63d517fb73c684dd3aabff3c3cef28a8efef8a2684102efde267cc
+   [root@localhost ~]# docker images
+   REPOSITORY      TAG          IMAGE ID       CREATED          SIZE
+   geek/myubuntu   1.1          f304cdbd6b63   16 seconds ago   176MB
+   ubuntu          latest       ba6acccedd29   7 months ago     72.8MB
+   ```
+
+5. 启动我们的新镜像并和原来的对比
+
+   ```shell
+   [root@localhost ~]# docker run -it ubuntu /bin/bash
+   root@7505f7a04ea4:/# ls
+   bin  boot  dev  etc  home  lib  lib32  lib64  libx32  media  mnt  opt  proc  root  run  sbin  srv  sys  tmp  usr  var
+   root@7505f7a04ea4:/# vim a.txt
+   bash: vim: command not found
+   root@7505f7a04ea4:/# exit
+   exit
+   [root@localhost ~]# docker run -it f304cdbd6b63 /bin/bash
+   root@b84c4a94a1db:/# ls
+   a.txt  bin  boot  dev  etc  home  lib  lib32  lib64  libx32  media  mnt  opt  proc  root  run  sbin  srv  sys  tmp  usr  var
+   root@b84c4a94a1db:/# vim a.txt
+   ```
+
+## 4、小总结
+
+Docker中的镜像分层，`支持通过扩展现有镜像，创建新的镜像`。类似Java继承于一个Base基础类，自己再按需扩展。
+新镜像是从 base 镜像一层一层叠加生成的。每安装一个软件，就在现有镜像的基础上增加一层
+
+<img src="README.assets/image-20220516195810923.png" alt="image-20220516195810923" style="zoom:80%;" />
+
+# 五、本地镜像发布到阿里云
+
+## 1、本地镜像发布到阿里云流程
+
+<img src="README.assets/image-20220516201457636.png" alt="image-20220516201457636" style="zoom:80%;" />
+
+## 2、镜像的生成方法
+
+> 基于当前容器创建一个新的镜像，新功能增强
+> docker commit [OPTIONS] 容器ID [REPOSITORY[:TAG]]
+
+后面的DockerFile章节，第2种方法
+
+## 3、将本地镜像推送到阿里云
+
+### 3-1、本地镜像素材原型
+
+![image-20220516201816737](README.assets/image-20220516201816737.png) 
+
+### 3-2、阿里云开发者平台
+
+https://promotion.aliyun.com/ntms/act/kubernetes.html
+
+### 3-3、创建仓库镜像
+
+1. 选择右上角控制台，进入容器镜像服务
+
+2. 选择个人实例（没有可以新建一个）
+
+   <img src="README.assets/image-20220516202257730.png" alt="image-20220516202257730" style="zoom: 80%;" /> 
+
+3. 新建命名空间
+
+   <img src="README.assets/image-20220516202439092.png" alt="image-20220516202439092" style="zoom:80%;" /> 
+
+4. 新建镜像仓库
+
+   <img src="README.assets/image-20220516202700646.png" alt="image-20220516202700646" style="zoom: 67%;" /> 
+
+   <img src="README.assets/image-20220516202749286.png" alt="image-20220516202749286" style="zoom:67%;" /> 
+
+5. 进入管理界面获得脚本命令
+
+   <img src="README.assets/image-20220516203012735.png" alt="image-20220516203012735" style="zoom:67%;" /> 
+
+## 4、将镜像推送到阿里云registry
+
+> 管理界面脚本
+
+<img src="README.assets/image-20220516203144404.png" alt="image-20220516203144404" style="zoom:80%;" /> 
+
+> 脚本实例(这里选择上面的第三条脚本实例)
+
+```shell
+[root@localhost test]# docker login --username=lambert班 registry.cn-hangzhou.aliyuncs.com
+Password: 
+WARNING! Your password will be stored unencrypted in /root/.docker/config.json.
+Configure a credential helper to remove this warning. See
+https://docs.docker.com/engine/reference/commandline/login/#credentials-store
+
+Login Succeeded
+[root@localhost test]# docker tag f304cdbd6b63 registry.cn-hangzhou.aliyuncs.com/lam_dockerstudy/myubuntu:1.1
+[root@localhost test]# docker push registry.cn-hangzhou.aliyuncs.com/lam_dockerstudy/myubuntu:1.1
+The push refers to repository [registry.cn-hangzhou.aliyuncs.com/lam_dockerstudy/myubuntu]
+747dcca8bea3: Pushed 
+9f54eef41275: Pushed 
+1.1: digest: sha256:c09165519445a5f62c8e0f72a63d68f2c4e4ac8ed83e174399c7af247e3ef023 size: 741
+```
+
+> 远程库：
+
+<img src="README.assets/image-20220516203640467.png" alt="image-20220516203640467" style="zoom:67%;" /> 
+
+## 5、将阿里云上的镜像下载到本地
+
+```shell
+#先删除本地的镜像后再拉取镜像
+[root@localhost test]# docker pull registry.cn-hangzhou.aliyuncs.com/lam_dockerstudy/myubuntu:1.1
+1.1: Pulling from lam_dockerstudy/myubuntu
+7b1a6ab2e44d: Already exists 
+73a8c64ac8c7: Already exists 
+Digest: sha256:c09165519445a5f62c8e0f72a63d68f2c4e4ac8ed83e174399c7af247e3ef023
+Status: Downloaded newer image for registry.cn-hangzhou.aliyuncs.com/lam_dockerstudy/myubuntu:1.1
+registry.cn-hangzhou.aliyuncs.com/lam_dockerstudy/myubuntu:1.1
+[root@localhost test]# docker images
+REPOSITORY                                                   TAG          IMAGE ID       CREATED          SIZE
+registry.cn-hangzhou.aliyuncs.com/lam_dockerstudy/myubuntu   1.1          f304cdbd6b63   45 minutes ago   176M
+```
 
