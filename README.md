@@ -1190,3 +1190,590 @@ REPOSITORY                                                   TAG          IMAGE 
 registry.cn-hangzhou.aliyuncs.com/lam_dockerstudy/myubuntu   1.1          f304cdbd6b63   45 minutes ago   176M
 ```
 
+# 六、本地镜像发布到私有库
+
+## 1、本地镜像发布到私有库流程
+
+<img src="README.assets/image-20220517092938755.png" alt="image-20220517092938755" style="zoom:67%;" /> 
+
+## 2、是什么
+
+1. 官方Docker Hub地址：https://hub.docker.com/，中国大陆访问太慢了且准备被阿里云取代的趋势，不太主流。
+2. Dockerhub、阿里云这样的公共镜像仓库可能不太方便，涉及机密的公司不可能提供镜像给公网，所以需要创建一个本地私人仓库供给团队使用，基于公司内部项目构建镜像。
+
+    Docker Registry是官方提供的工具，可以用于构建私有镜像仓库
+
+## 3、将本地镜像推送到私有库
+
+1. 下载镜像Docker Registry
+
+   ```shell
+   [root@localhost ~]# docker pull registry
+   [root@localhost ~]# docker images
+   REPOSITORY                                                   TAG          IMAGE ID       CREATED         SIZE
+   registry.cn-hangzhou.aliyuncs.com/lam_dockerstudy/myubuntu   1.1          f304cdbd6b63   14 hours ago    176MB
+   registry                                                     latest       b8604a3fe854   6 months ago    26.2MB
+   ```
+
+2. 运行私有库Registry，相当于本地有个私有Docker hub
+
+   ```shell
+   [root@localhost ~]# docker run -d -p 5000:5000  -v /zzyyuse/myregistry/:/tmp/registry --privileged=true registry
+   [root@localhost ~]# docker ps
+   CONTAINER ID   IMAGE      COMMAND                  CREATED         STATUS         PORTS                                       NAMES
+   f85c4ec942e8   registry   "/entrypoint.sh /etc…"   5 seconds ago   Up 3 seconds   0.0.0.0:5000->5000/tcp, :::5000->5000/tcp   inspiring_lichterman
+   ```
+
+   > 默认情况，仓库被创建在容器的/var/lib/registry目录下，建议自行用容器卷映射(上是/zzyyuse/myregistry/)，方便于宿主机联调
+
+3. 案例演示创建一个新镜像，ubuntu安装ifconfig命令
+
+   1. 从Hub上下载ubuntu镜像到本地并成功运行
+
+   2. 原始的Ubuntu镜像是不带着ifconfig命令的
+
+      ```shell
+      root@7505f7a04ea4:/# ifconfig
+      bash: ifconfig: command not found
+      ```
+
+   3. 外网连通的情况下，安装ifconfig命令并测试通过
+
+      ```shell
+      root@7505f7a04ea4:/# apt-get update
+      root@7505f7a04ea4:/# apt-get install net-tools
+      root@7505f7a04ea4:/# ifconfig
+      eth0: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500
+              inet 172.17.0.3  netmask 255.255.0.0  broadcast 172.17.255.255
+              .....
+      ```
+
+   4. 安装完成后，commit我们自己的新镜像
+
+      ```shell
+      [root@localhost ~]# docker commit -m="add net-tools" -a="lambert" 7505f7a04ea4 mybuntu-ifconfig:1.2
+      sha256:47bfe84e0d9061a38eae95813c5779aa78a450758b23fbef4c5808d111ad6bcf
+      ```
+
+   5. 启动我们的新镜像
+
+      ```shell
+      [root@localhost ~]# docker run -it 47bfe84e0d90 /bin/bash
+      root@a27c47f23172:/# ifconfig
+      eth0: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500
+              inet 172.17.0.4  netmask 255.255.0.0  broadcast 172.17.255.255
+              ......
+      ```
+
+4. curl验证私服库上有什么镜像
+
+   ```shell
+   [root@localhost ~]# curl -XGET http://10.1.53.169:5000/v2/_catalog
+   {"repositories":[]}
+   ```
+
+5. 将新镜像mybuntu-ifconfig:1.2修改符合私服规范的Tag
+
+   使用命令 docker tag 将mybuntu-ifconfig:1.2 这个镜像修改为10.1.53.169:5000/mybuntu-ifconfig:1.2
+
+   > docker tag 镜像:Tag Host:Port/Repository:Tag
+
+   ```shell
+   [root@localhost ~]# docker tag mybuntu-ifconfig:1.2 10.1.53.169:5000/mybuntu-ifconfig:1.2
+   ```
+
+6. 修改配置文件使之支持http
+
+   ```shell
+   [root@localhost ~]# vim /etc/docker/daemon.json
+   {
+     "registry-mirrors": ["https://aa25jngu.mirror.aliyuncs.com"],
+     "insecure-registries": ["10.1.53.169:5000"]
+   }
+   ```
+
+   docker默认不允许http方式推送镜像，通过配置选项来取消这个限制。====> 修改完后如果不生效，建议重启docker
+
+7. push推送到私服库
+
+   ```shell
+   [root@localhost ~]# docker push 10.1.53.169:5000/mybuntu-ifconfig:1.2
+   The push refers to repository [10.1.53.169:5000/mybuntu-ifconfig]
+   dad7c5880432: Pushed 
+   9f54eef41275: Pushed 
+   1.2: digest: sha256:648f79cb972834171ad293a33a3d4c54e534a4f86a1cc0e66e247d3f7ed0713e size: 741
+   ```
+
+8. 再次curl验证私服库上有什么镜像
+
+   ```shell
+   [root@localhost ~]# curl -XGET http://10.1.53.169:5000/v2/_catalog
+   {"repositories":["mybuntu-ifconfig"]}
+   ```
+
+9. pull到本地并运行
+
+   先删除10.1.53.169:5000/mybuntu-ifconfig镜像
+
+   ```shell
+   [root@localhost ~]# docker pull 10.1.53.169:5000/mybuntu-ifconfig:1.2
+   1.2: Pulling from mybuntu-ifconfig
+   Digest: sha256:648f79cb972834171ad293a33a3d4c54e534a4f86a1cc0e66e247d3f7ed0713e
+   Status: Downloaded newer image for 10.1.53.169:5000/mybuntu-ifconfig:1.2
+   10.1.53.169:5000/mybuntu-ifconfig:1.2
+   [root@localhost ~]# docker images
+   REPOSITORY                                                   TAG          IMAGE ID       CREATED         SIZE
+   10.1.53.169:5000/mybuntu-ifconfig                            1.2          47bfe84e0d90   4 hours ago     110MB
+   [root@localhost ~]# docker run -it 47bfe84e0d90 /bin/bash
+   root@bc63f8bc31d2:/#ifconfig
+   eth0: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500
+           ....
+   ```
+
+# 七、Docker容器数据卷
+
+> 前提设置
+
+Docker挂载主机目录访问`如果出现cannot open directory .: Permission denied`
+
+解决办法：在挂载目录后多加一个`--privileged=true`参数即可
+
+如果是CentOS7安全模块会比之前系统版本加强，不安全的会先禁止，所以目录挂载的情况被默认为不安全的行为，
+在SELinux里面挂载目录被禁止掉了额，如果要开启，我们一般使用--privileged=true命令，扩大容器的权限解决挂载目录没有权限的问题，也即
+使用该参数，container内的root拥有真正的root权限，否则，container内的root只是外部的一个普通用户权限。
+
+## 1、回顾下上一讲的知识点，参数V
+
+<img src="README.assets/image-20220517140613724.png" alt="image-20220517140613724" style="zoom:67%;" />
+
+-v /zzyyuse/myregistry/ : /tmp/registry/:第一个是宿主机的目录，第二个是容器内的目录，完成宿主机和容器内目录的备份与持久化
+
+## 2、容器数据卷是什么
+
+卷就是目录或文件，存在于一个或多个容器中，由docker挂载到容器，但不属于联合文件系统，因此能够绕过Union File System提供一些用于持续存储或共享数据的特性：
+卷的设计目的就是`数据的持久化`，完全独立于容器的生存周期，因此Docker不会在容器删除时删除其挂载的数据卷
+
+> 一句话：有点类似我们Redis里面的rdb和aof文件
+
+> 将docker容器内的数据保存进宿主机的磁盘中
+
+> 运行一个带有容器卷存储功能的容器实例
+
+```shell
+ docker run -it --privileged=true -v /宿主机绝对路径目录:/容器内目录 镜像名
+```
+
+## 3、容器数据卷能干嘛
+
+将运用与运行的环境打包镜像，run后形成容器实例运行 ，但是我们对数据的要求希望是`持久化`的
+
+Docker容器产生的数据，如果不备份，那么当容器实例删除后，容器内的数据自然也就没有了。为了能保存数据在docker中我们使用卷。
+
+特点：
+
+1. 数据卷可在容器之间共享或重用数据
+2. 卷中的更改可以直接实时生效
+3. 数据卷中的更改不会包含在镜像的更新中
+4. 数据卷的生命周期一直持续到没有容器使用它为止
+
+## 4、数据卷案例
+
+### 4-1、宿主和容器之间映射添加容器卷
+
+```shell
+[root@localhost ~]#  docker run -it --privileged=true -v /tmp/host_data:/tmp/docker_data --name=u1 ubuntu
+root@971e934e8a5f:/# cd /tmp/docker_data
+root@971e934e8a5f:/tmp/docker_data# 
+```
+
+1. 查看数据卷是否挂载成功
+
+   > docker inspect 容器ID
+
+   <img src="README.assets/image-20220517144020231.png" alt="image-20220517144020231" style="zoom:80%;" /> 
+
+2. 在容器卷内新建数据
+
+   ```shell
+   root@971e934e8a5f:/tmp/docker_data# touch dockerin.txt
+   root@971e934e8a5f:/tmp/docker_data# ls
+   dockerin.txt
+   ```
+
+3. 宿主机映射的文件夹
+
+   ```shell
+   [root@localhost myregistry]# cd /tmp/host_data
+   [root@localhost host_data]# ls
+   dockerin.txt
+   ```
+
+4. 宿主机修改
+
+   ```shell
+   [root@localhost host_data]# touch hostin.txt
+   ```
+
+5. 查看容器卷内
+
+   ```shell
+   root@971e934e8a5f:/tmp/docker_data# ls
+   dockerin.txt  hostin.txt
+   ```
+
+docker修改，主机同步获得 
+主机修改，docker同步获得
+docker容器stop，主机修改，docker容器重启数据同步获得。
+
+### 4-2、读写规则映射添加说明
+
+1. 读写(默认)
+
+   >  docker run -it --privileged=true -v /宿主机绝对路径目录:/容器内目录:rw 镜像名
+
+   默认同上面的案例，默认就是rw
+
+2. 只读：容器实例内部被限制，只能读取不能写
+
+   >  docker run -it --privileged=true -v /宿主机绝对路径目录:/容器内目录:ro 镜像名
+
+   ```shell
+   [root@localhost ~]# docker run -it --privileged=true -v /tmp/host_read-only_file:/tmp/docker_read-only_file:ro ubuntu
+   root@54339c7c3385:/# cd tmp
+   root@54339c7c3385:/tmp# ls
+   docker_read-only_file
+   root@54339c7c3385:/tmp# cd docker_read-only_file
+   root@54339c7c3385:/tmp/docker_read-only_file# touch a.txt
+   touch: cannot touch 'a.txt': Read-only file system
+   ```
+
+   ro = read only
+
+   此时如果宿主机写入内容，可以同步给容器内，容器可以读取到。
+
+### 4-3、卷的继承和共享
+
+1. 容器2完成和宿主机的映射
+
+   ```shell
+   #容器
+   [root@localhost host_data]# docker run -it --privileged=true -v /mydocker/u:/tmp/u --name u2 ubuntu
+   root@5f8b2037b56a:/# cd /tmp/u
+   root@5f8b2037b56a:/tmp/u# touch u2data.txt
+   
+   #宿主机
+   [root@localhost ~]# cd /mydocker/u
+   [root@localhost u]# ls
+   u2data.txt
+   ```
+
+2. 容器3继承容器2的卷规则
+
+   > docker run -it  --privileged=true `--volumes-from` 父类  --name u2 ubuntu
+
+   ```shell
+   #运行容器3 继承容器2的卷规则
+   [root@localhost u]# docker run -it  --privileged=true --volumes-from u2  --name u3 ubuntu
+   root@111ce205b112:/# cd /tmp/u
+   root@111ce205b112:/tmp/u# ls
+   u2data.txt
+   #容器3中目录新建文件
+   root@111ce205b112:/tmp/u# touch u3data.txt
+   root@111ce205b112:/tmp/u# ls
+   u2data.txt  u3data.txt
+   #宿主机同步目录
+   [root@localhost ~]# cd /mydocker/u
+   [root@localhost u]# ls
+   u2data.txt  u3data.txt
+   ```
+
+   > 容器3继承的是规则，并不是容器2，就算容器2挂了，容器3照样能正常同步宿主机的目录
+
+# 八、Docker常规安装简介
+
+## 1、总体步骤
+
+1. 搜索镜像
+2. 拉取镜像
+3. 查看镜像
+4. 启动镜像（服务端口映射）
+5. 停止容器
+6. 移除容器
+
+## 2、安装tomcat
+
+1. dockerhub(https://hub.docker.com/)上面查找tomcat镜像
+
+   或
+
+   ```shell
+   docker search tomcat
+   ```
+
+2. 从docker hub上拉取tomcat镜像到本地
+
+   ```shell
+   [root@localhost u]# docker pull tomcat
+   Using default tag: latest
+   latest: Pulling from library/tomcat
+   ....
+   ```
+
+3. docker images查看是否有拉取到的tomcat
+
+   ```shell
+   [root@localhost u]# docker images tomcat
+   REPOSITORY   TAG       IMAGE ID       CREATED        SIZE
+   tomcat       latest    fb5657adc892   4 months ago   680MB
+   ```
+
+4. 使用tomcat镜像创建容器实例(也叫运行镜像)
+
+   ```shell
+   [root@localhost u]# docker run -it -p 8080:8080 tomcat
+   ```
+
+   - -p 小写，主机端口:docker容器端口
+
+   - -P 大写，随机分配端口
+
+     <img src="README.assets/image-20220517160131920.png" alt="image-20220517160131920" style="zoom:80%;" />
+
+   - i:交互式启动
+
+   - t:终端
+
+   - d:后台
+
+5. 访问猫首页
+
+   > 若404未找到，有可能需要给8080端口开放防火墙或者可能没有映射端口
+   >
+   > 或者需要把`webapps.dist`目录换成`webapps`
+
+   开放防火墙：
+
+   ```shell
+   [root@localhost u]# firewall-cmd --permanent --add-port=8080/tcp
+   [root@localhost u]# firewall-cmd --reload
+   ```
+
+   把`webapps.dist`目录换成`webapps`:
+
+   1. 先成功启动tomcat
+
+      ```shell
+      [root@localhost u]# docker ps
+      CONTAINER ID   IMAGE      COMMAND                  CREATED          STATUS          PORTS                                       NAMES
+      7317ce2059c5   tomcat     "catalina.sh run"        5 minutes ago    Up 5 minutes    0.0.0.0:8080->8080/tcp, :::8080->8080/tcp   unruffled_jennings
+      5f8b2037b56a   ubuntu     "bash"                   32 minutes ago   Up 32 minutes                                               u2
+      fd564ee8d4f5   registry   "/entrypoint.sh /etc…"   2 hours ago      Up 2 hours      0.0.0.0:5000->5000/tcp, :::5000->5000/tcp   upbeat_sanderson
+      [root@localhost u]# docker exec -it 7317ce2059c5 /bin/bash
+      ```
+
+   2. 查看webapps文件夹查看为空
+
+      ```shell
+      root@7317ce2059c5:/usr/local/tomcat# ls -l
+      total 132
+      ....
+      drwxr-xr-x 2 root root     6 Dec 22 17:06 webapps
+      drwxr-xr-x 7 root root    81 Dec  2 22:01 webapps.dist
+      ....
+      #webapps为空
+      root@7317ce2059c5:/usr/local/tomcat# cd webapps
+      root@7317ce2059c5:/usr/local/tomcat/webapps# ls -l
+      total 0
+      #删除webapps
+      root@7317ce2059c5:/usr/local/tomcat# rm -r webapps
+      #将webapps.dist改名危webapps
+      root@7317ce2059c5:/usr/local/tomcat# mv webapps.dist webapps
+      ```
+
+   再次访问：
+
+   <img src="README.assets/image-20220517161441462.png" alt="image-20220517161441462" style="zoom:80%;" />
+
+### 2-1、免修改版说明
+
+```shell
+#run时若本地无该镜像会自动去镜像库下载
+[root@localhost u]# docker run -d -p 8080:8080 --name mytomcat8 billygoo/tomcat8-jdk8
+```
+
+下载完成后访问：
+
+<img src="README.assets/image-20220517162423179.png" alt="image-20220517162423179" style="zoom:80%;" /> 
+
+
+
+## 3、安装mysql
+
+### 3-1、docker hub上面查找mysql镜像
+
+```shell
+[root@localhost u]# docker search mysql
+NAME                           DESCRIPTION                                     STARS     OFFICIAL   AUTOMATED
+mysql                          MySQL is a widely used, open-source relation…   12582     [OK]       
+mariadb                        MariaDB Server is a high performing open sou…   4836      [OK]       
+...    
+```
+
+### 3-2、从docker hub上(阿里云加速器)拉取mysql镜像到本地标签为5.7
+
+```shell
+[root@localhost u]# docker pull mysql:5.7
+```
+
+<img src="README.assets/image-20220517200501935.png" alt="image-20220517200501935" style="zoom:80%;" /> 
+
+### 3-3、使用mysql5.7镜像创建容器(也叫运行镜像)
+
+1. 简单版
+
+   1. 使用mysql镜像
+
+      ```shell
+      [root@localhost u]# docker run -p 3306:3306 -e MYSQL_ROOT_PASSWORD=123456 -d mysql:5.7
+      282a63f1da72caca4e8f7607ea591d832ee970c6f9599f899bd8a4926020eba1
+      ```
+
+      若报错
+
+      ```shell
+      docker: Error response from daemon: driver failed programming external connectivity on endpoint practical_lamarr (611a651c0d0ae469cdace95eefc6f734299aa381c9e9861f23c28c3c9f74f77b): Error starting userland proxy: listen tcp4 0.0.0.0:3306: bind: address already in use.
+      ```
+
+      是由于linux的mysql已启动占用了3306需要关闭mysql服务
+
+      ```shell
+      [root@localhost u]# service mysqld stop
+      ```
+
+      继续启动mysql进入服务
+
+      ```shell
+      [root@localhost u]# docker ps
+      CONTAINER ID   IMAGE                   COMMAND                  CREATED              STATUS              PORTS                                                  NAMES
+      282a63f1da72   mysql:5.7               "docker-entrypoint.s…"   About a minute ago   Up About a minute   0.0.0.0:3306->3306/tcp, :::3306->3306/tcp, 33060/tcp   elated_sanderson
+      [root@localhost u]# docker exec -it 282a63f1da72 /bin/bash
+      root@282a63f1da72:/# mysql -uroot -p
+      Enter password:
+      ```
+
+      <img src="README.assets/image-20220517201526386.png" alt="image-20220517201526386" style="zoom:80%;" />
+
+   2. 建库建表插入数据
+
+      <img src="README.assets/image-20220517201836711.png" alt="image-20220517201836711" style="zoom: 80%;" /> 
+
+   3. 外部Win10也来连接运行在dokcer上的mysql容器实例服务
+
+      <img src="README.assets/image-20220517202005908.png" alt="image-20220517202005908" style="zoom:67%;" /> 
+
+   4. 问题
+
+      插入中文数据试试 -->
+
+      <img src="README.assets/image-20220517202129092.png" alt="image-20220517202129092" style="zoom:80%;" /> 
+
+      报错原因 --> docker上默认字符集编码隐患:
+
+      <img src="README.assets/image-20220517202255707.png" alt="image-20220517202255707" style="zoom: 80%;" /> 
+
+      同时该容器也不存在数据卷，安全性不高
+
+2. 实战版
+
+   1. 新建mysql容器实例
+
+      > [root@localhost u]# docker run -d -p 3306:3306 
+      >
+      > --privileged=true 
+      >
+      > -v /zzyyuse/mysql/log:/var/log/mysql 
+      >
+      > -v /zzyyuse/mysql/data:/var/lib/mysql 
+      >
+      > -v /zzyyuse/mysql/conf:/etc/mysql/conf.d 
+      >
+      > -e MYSQL_ROOT_PASSWORD=123456  
+      >
+      > --name mysql mysql:5.7
+
+      ```shell
+      [root@localhost u]# docker run -d -p 3306:3306 --privileged=true -v /zzyyuse/mysql/log:/var/log/mysql -v /zzyyuse/mysql/data:/var/lib/mysql -v /zzyyuse/mysql/conf:/etc/mysql/conf.d -e MYSQL_ROOT_PASSWORD=123456  --name mysql mysql:5.7
+      c0add9c5f42e7a9a72cdf04efbf321386f0785458affa6d2294ba7b675c5b8a6
+      ```
+
+   2. 新建my.cnf
+
+      > 通过容器卷同步给mysql容器实例
+
+      ```shell
+      [root@localhost u]# cd /zzyyuse/mysql/conf
+      [root@localhost conf]# ls
+      [root@localhost conf]# vim my.cnf
+      [client]
+      default_character_set=utf8
+      [mysqld]
+      collation_server = utf8_general_ci
+      character_set_server = utf8
+      [root@localhost conf]# cat my.cnf
+      [client]
+      default_character_set=utf8
+      [mysqld]
+      collation_server = utf8_general_ci
+      character_set_server = utf8
+      ```
+
+   3. 重新启动mysql容器实例再重新进入并查看字符编码
+
+      ```shell
+      [root@localhost conf]# docker restart mysql
+      mysql
+      [root@localhost conf]# docker exec -it mysql bash
+      root@c0add9c5f42e:/# mysql -uroot -p
+      Enter password: 
+      ```
+
+      <img src="README.assets/image-20220517203841895.png" alt="image-20220517203841895" style="zoom: 80%;" /> 
+
+   4. 再新建库新建表再插入中文测试
+
+      ```shell
+      mysql> create database db01;
+      Query OK, 1 row affected (0.02 sec)
+      
+      mysql> use db01;
+      Database changed
+      mysql> create table test(id int,name varchar(20));
+      Query OK, 0 rows affected (0.01 sec)
+      ```
+
+      <img src="README.assets/image-20220517204105406.png" alt="image-20220517204105406" style="zoom: 80%;" /> 
+
+   5. 结论：docker安装完MySQL并run出容器后，建议请`先修改完字符集编码后再新建mysql库-表-插数据`
+
+   6. 假如将当前容器实例删除，再重新来一次，之前建的db01实例还有吗？trytry
+
+      ```shell
+      [root@localhost mysql]# docker rm -f mysql
+      mysql
+      [root@localhost mysql]# docker run -d -p 3306:3306 --privileged=true -v /zzyyuse/mysql/log:/var/log/mysql -v /zzyyuse/mysql/data:/var/lib/mysql -v /zzyyuse/mysql/conf:/etc/mysql/conf.d -e MYSQL_ROOT_PASSWORD=123456  --name mysql mysql:5.7
+      6e3eb3a617bc504e0501838899d695847dd7c4ea70b7afaa6ef3cf7d2171fd99
+      [root@localhost conf]# docker exec -it mysql bash
+      root@6e3eb3a617bc:/# mysql -uroot -p 
+      Enter password: 
+      ```
+
+      <img src="README.assets/image-20220517204907958.png" alt="image-20220517204907958" style="zoom:80%;" /> 
+
+      发现db01数据还在！
+
+   
+
+   
+
+
+
