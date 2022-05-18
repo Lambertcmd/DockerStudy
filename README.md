@@ -2111,7 +2111,44 @@ OK
 
 14. 查看从数据库状态发现已经同步
 
-    ```shell
+    <img src="README.assets/image-20220518204910039.png" alt="image-20220518204910039" style="zoom:80%;" /> 
+
+15. 主从复制测试
+
+    > 新建库-使用库-新建表-插入数据
+
+    ```mysql
+    mysql> create database test01;
+    Query OK, 1 row affected (0.01 sec)
+    
+    mysql> use test01;
+    Database changed
+    mysql> create table t1(id int,name varchar(20));
+    Query OK, 0 rows affected (0.02 sec)
+    
+    mysql> show tables;
+    +------------------+
+    | Tables_in_test01 |
+    +------------------+
+    | t1               |
+    +------------------+
+    1 row in set (0.00 sec)
+    mysql> insert into t1 values(1,'lambert');
+    Query OK, 1 row affected (0.00 sec)
+    mysql> select * from t1
+        -> ;
+    +------+---------+
+    | id   | name    |
+    +------+---------+
+    |    1 | lambert |
+    +------+---------+
+    1 row in set (0.01 sec)
     ```
+
+16. 从机使用库-查看记录
+
+    <img src="README.assets/image-20220518205603556.png" alt="image-20220518205603556" style="zoom:80%;" /> 
+
+    
 
     
