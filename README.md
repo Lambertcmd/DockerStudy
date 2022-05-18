@@ -1771,9 +1771,347 @@ mariadb                        MariaDB Server is a high performing open sou…  
 
       发现db01数据还在！
 
+
+## 4、安装redis
+
+### 4-1、拉取镜像
+
+> 从docker hub上(阿里云加速器)拉取redis镜像到本地
+
+```shell
+[root@localhost ~]# docker pull redis
+```
+
+### 4-2、入门命令
+
+```shell
+#启动redis服务
+[root@localhost ~]# docker run -d -p 6379:6379 --name redis redis
+[root@localhost ~]# docker exec -it redis /bin/bash
+root@456620e221ff:/data# redis-cli
+127.0.0.1:6379> set k1 v1
+OK
+127.0.0.1:6379> get k1
+"v1"
+```
+
+### 4-3、实战命令
+
+1. 在CentOS宿主机下新建目录/app/redis
+
+   ```shell
+   root@localhost ~]# mkdir -p /app/redis
+   ```
+
+2. 将一个redis.conf文件模板拷贝进/app/redis目录下
+
+   ```shell
+   [root@localhost /]# cp /myredis/redis.conf /app/redis/
+   [root@localhost /]# cd /app/redis
+   [root@localhost redis]# ls
+   redis.conf
+   ```
+
+3. `/app/redis`目录下修改redis.conf文件
+
+   ```shell
+   [root@localhost redis]# vim redis.conf
+   ```
+
+   1. 开启允许redis外地连接
+
+      > 注释掉 # bind 127.0.0.1
+
+      <img src="README.assets/image-20220518145147907.png" alt="image-20220518145147907" style="zoom:80%;" /> 
+
+   2. daemonize no（是否启动为后台进程）
+
+      > 将daemonize yes注释起来或者 daemonize no设置，因为该配置和docker run中-d参数冲突，会导致容器一直启动失败
+
+   3. 开启redis数据持久化(可选)
+
+      > appendonly yes
+
+4. 使用redis镜像创建容器（运行容器）
+
+   ```shell
+   [root@localhost redis]# docker run  -p 6379:6379 --name myredis --privileged=true -v /app/redis/redis.conf:/etc/redis/redis.conf -v /app/redis/data:/data -d redis redis-server /etc/redis/redis.conf
+   [root@localhost redis]# docker ps
+   CONTAINER ID   IMAGE     COMMAND                  CREATED         STATUS         PORTS                                       NAMES
+   635bdcad2493   redis     "docker-entrypoint.s…"   6 seconds ago   Up 5 seconds   0.0.0.0:6379->6379/tcp, :::6379->6379/tcp   myredis
+   ```
+
+5. 测试redis-cli连接上来
+
+   ```shell
+   [root@localhost redis]# docker exec -it myredis /bin/bash
+   root@635bdcad2493:/data# redis-cli
+   127.0.0.1:6379> 
    
-
+   #或者
    
+   [root@localhost redis]# docker exec -it myredis redis-cli
+   127.0.0.1:6379>
+   ```
+
+6. 证明docker启动使用了我们自己指定的配置文件
+
+   1. 修改前
+
+      ```shell
+      127.0.0.1:6379> keys *
+      (empty array)
+      127.0.0.1:6379> set k1 v1
+      OK
+      127.0.0.1:6379> get k1
+      "v1"
+      127.0.0.1:6379> select 15
+      OK
+      127.0.0.1:6379[15]> select 16
+      (error) ERR DB index is out of range
+      127.0.0.1:6379[15]> exit
+      ```
+
+      我们用的配置文件，数据库默认是16个(0-15)
+
+   2. 修改后
+
+      <img src="README.assets/image-20220518163124805.png" alt="image-20220518163124805" style="zoom:67%;" /> 
+
+      重启redis服务
+
+      宿主机的修改会同步给docker容器里面的配置。
+
+      ```shell
+      [root@localhost redis]# docker restart myredis
+      myredis
+      [root@localhost redis]# docker exec -it myredis redis-cli
+      127.0.0.1:6379> keys *
+      1) "k1"
+      127.0.0.1:6379> select 11
+      (error) ERR DB index is out of range
+      127.0.0.1:6379> get k1
+      "v1"
+      ```
+
+## 5、nginx安装
 
 
 
+以上为Docker基础篇`
+
+------
+
+`下面为docker高级篇`
+
+# 九、Docker复杂安装详说
+
+## 1、安装mysql主从复制
+
+1. `新建主服务器容器实例3307`
+
+   > docker run -p 3307:3306 --name mysql-master \
+   > -v /mydata/mysql-master/log:/var/log/mysql \
+   > -v /mydata/mysql-master/data:/var/lib/mysql \
+   > -v /mydata/mysql-master/conf:/etc/mysql \
+   > -e MYSQL_ROOT_PASSWORD=root  \
+   > -d mysql:5.7
+
+   ```shell
+   [root@localhost redis]# docker run -p 3307:3306 --name mysql-master \
+   > -v /mydata/mysql-master/log:/var/log/mysql \
+   > -v /mydata/mysql-master/data:/var/lib/mysql \
+   > -v /mydata/mysql-master/conf:/etc/mysql \
+   > -e MYSQL_ROOT_PASSWORD=root  \
+   > -d mysql:5.7
+   a255b50f9b35784db04152bab8600b1397fd967cf499b669662bb2d40fa3d0ef
+   [root@localhost redis]# docker ps
+   CONTAINER ID   IMAGE       COMMAND                  CREATED          STATUS          PORTS                                                  NAMES
+   a255b50f9b35   mysql:5.7   "docker-entrypoint.s…"   24 seconds ago   Up 23 seconds   33060/tcp, 0.0.0.0:3307->3306/tcp, :::3307->3306/tcp   mysql-master
+   ```
+
+2. 进入/mydata/mysql-master/conf目录下新建my.cnf
+
+   ```shell
+   [root@localhost redis]# cd /mydata/mysql-master/conf
+   [root@localhost conf]# ls
+   [root@localhost conf]# vim my.cnf
+   [mysqld]
+   ## 设置server_id，同一局域网中需要唯一
+   server_id=101 
+   ## 指定不需要同步的数据库名称
+   binlog-ignore-db=mysql  
+   ## 开启二进制日志功能
+   log-bin=mall-mysql-bin  
+   ## 设置二进制日志使用内存大小（事务）
+   binlog_cache_size=1M  
+   ## 设置使用的二进制日志格式（mixed,statement,row）
+   binlog_format=mixed  
+   ## 二进制日志过期清理时间。默认值为0，表示不自动清理。
+   expire_logs_days=7  
+   ## 跳过主从复制中遇到的所有错误或指定类型的错误，避免slave端复制中断。
+   ## 如：1062错误是指一些主键重复，1032错误是因为主从数据库数据不一致
+   slave_skip_errors=1062
+   
+   ## 字符编码设置
+   collation_server = utf8_general_ci
+   character_set_server = utf8
+   
+   [client]
+   default_character_set=utf8
+   ```
+
+3. 修改完配置后重启master实例
+
+   ```shell
+   [root@localhost conf]# docker restart mysql-master
+   mysql-master
+   ```
+
+4. 进入mysql-master容器
+
+   ```shell
+   [root@localhost conf]# docker exec -it mysql-master /bin/bash
+   root@a255b50f9b35:/# mysql -uroot -proot
+   .....
+   Type 'help;' or '\h' for help. Type '\c' to clear the current input statement.
+   
+   mysql> 
+   ```
+
+5. master容器实例内创建数据同步用户
+
+   ```shell
+   #新建用户
+   mysql> CREATE USER 'slave'@'%' IDENTIFIED BY '123456';
+   Query OK, 0 rows affected (0.01 sec)
+   
+   #用户授予权限
+   mysql> GRANT REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'slave'@'%';
+   Query OK, 0 rows affected (0.00 sec)
+   
+   ```
+
+6. `新建从服务器容器实例3308`
+
+   > docker run -p 3308:3306 --name mysql-slave \
+   > -v /mydata/mysql-slave/log:/var/log/mysql \
+   > -v /mydata/mysql-slave/data:/var/lib/mysql \
+   > -v /mydata/mysql-slave/conf:/etc/mysql \
+   > -e MYSQL_ROOT_PASSWORD=root  \
+   > -d mysql:5.7
+
+   ```shell
+   [root@localhost ~]# docker run -p 3308:3306 --name mysql-slave \
+   > -v /mydata/mysql-slave/log:/var/log/mysql \
+   > -v /mydata/mysql-slave/data:/var/lib/mysql \
+   > -v /mydata/mysql-slave/conf:/etc/mysql \
+   > -e MYSQL_ROOT_PASSWORD=root  \
+   > -d mysql:5.7
+   1215820fdbe0a7e525fa299167c51648a4b28a3e73951cede7d3adf52c516cd4
+   [root@localhost ~]# docker ps
+   CONTAINER ID   IMAGE       COMMAND                  CREATED          STATUS         PORTS                                                  NAMES
+   1215820fdbe0   mysql:5.7   "docker-entrypoint.s…"   3 seconds ago    Up 1 second    33060/tcp, 0.0.0.0:3308->3306/tcp, :::3308->3306/tcp   mysql-slave
+   a255b50f9b35   mysql:5.7   "docker-entrypoint.s…"   19 minutes ago   Up 3 minutes   33060/tcp, 0.0.0.0:3307->3306/tcp, :::3307->3306/tcp   mysql-master
+   ```
+
+7. 进入/mydata/mysql-slave/conf目录下新建my.cnf
+
+   ```shell
+   [mysqld]
+   ## 设置server_id，同一局域网中需要唯一
+   server_id=102
+   ## 指定不需要同步的数据库名称
+   binlog-ignore-db=mysql  
+   ## 开启二进制日志功能，以备Slave作为其它数据库实例的Master时使用
+   log-bin=mall-mysql-slave1-bin  
+   ## 设置二进制日志使用内存大小（事务）
+   binlog_cache_size=1M  
+   ## 设置使用的二进制日志格式（mixed,statement,row）
+   binlog_format=mixed  
+   ## 二进制日志过期清理时间。默认值为0，表示不自动清理。
+   expire_logs_days=7  
+   ## 跳过主从复制中遇到的所有错误或指定类型的错误，避免slave端复制中断。
+   ## 如：1062错误是指一些主键重复，1032错误是因为主从数据库数据不一致
+   slave_skip_errors=1062  
+   ## relay_log配置中继日志
+   relay_log=mall-mysql-relay-bin  
+   ## log_slave_updates表示slave将复制事件写进自己的二进制日志
+   log_slave_updates=1  
+   ## slave设置为只读（具有super权限的用户除外）
+   read_only=1
+   
+   ## 字符编码设置
+   collation_server = utf8_general_ci
+   character_set_server = utf8
+   
+   [client]
+   default_character_set=utf8
+   ```
+
+8. 修改完配置后重启slave实例
+
+   ```shell
+   [root@localhost conf]# docker restart mysql-slave
+   mysql-slave
+   ```
+
+9. 在主数据库中查看主从同步状态
+
+   ```shell
+   mysql> show master status;
+   +-----------------------+----------+--------------+------------------+-------------------+
+   | File                  | Position | Binlog_Do_DB | Binlog_Ignore_DB | Executed_Gtid_Set |
+   +-----------------------+----------+--------------+------------------+-------------------+
+   | mall-mysql-bin.000002 |      617 |              | mysql            |                   |
+   +-----------------------+----------+--------------+------------------+-------------------+
+   1 row in set (0.01 sec)
+   ```
+
+10. 进入mysql-slave容器
+
+    ```shell
+    [root@localhost conf]# docker exec -it mysql-slave /bin/bash
+    root@1215820fdbe0:/# mysql -uroot -proot
+    ```
+
+11. 在`从数据库`中配置主从复制
+
+    > change master to master_host='宿主机ip', master_user='slave', master_password='123456', master_port=3307, master_log_file='查看主数据的状态，获取File参数', master_log_pos=查看主数据的状态，获取Position参数, master_connect_retry=30;
+
+    ```shell
+    mysql> change master to master_host='10.1.53.169', master_user='slave', master_password='123456', master_port=3307, master_log_file='mall-mysql-bin.000002', master_log_pos=617, master_connect_retry=30;
+    Query OK, 0 rows affected, 2 warnings (0.04 sec)
+    ```
+
+    主从复制命令参数说明
+
+    > master_host：主数据库的IP地址；
+    > master_port：主数据库的运行端口；
+    > master_user：在主数据库创建的用于同步数据的用户账号；
+    > master_password：在主数据库创建的用于同步数据的用户密码；
+    > master_log_file：指定从数据库要复制数据的日志文件，通过查看主数据的状态，获取File参数；
+    > master_log_pos：指定从数据库从哪个位置开始复制数据，通过查看主数据的状态，获取Position参数；
+    > master_connect_retry：连接失败重试的时间间隔，单位为秒。
+
+12. 在`从数据库`中查看主从同步状态
+
+    ```shell
+    mysql> show slave status \G;
+    ```
+
+    <img src="README.assets/image-20220518202507106.png" alt="image-20220518202507106" style="zoom:67%;" /> 
+
+13. 在从数据库中开启主从同步
+
+    ```shell
+    mysql> start slave;
+    Query OK, 0 rows affected (0.02 sec)
+    ```
+
+14. 查看从数据库状态发现已经同步
+
+    ```shell
+    ```
+
+    
