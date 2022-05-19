@@ -2149,7 +2149,7 @@ OK
 
     <img src="README.assets/image-20220518205603556.png" alt="image-20220518205603556" style="zoom:80%;" /> 
 
-## 2、安装redis集群
+## 2、安装redis集群(大厂面试题第4季-分布式存储案例真题)
 
 > cluster(集群)模式-docker版 哈希槽分区进行亿级数据存储
 
@@ -2240,13 +2240,411 @@ OK
 
 3. 哈希槽分区
 
+   `由于一致性哈希算法的数据倾斜问题`,出现了哈希槽分区，哈希槽实质就是一个数组，数组[0,2^14 -1]形成hash slot空间。
 
+   能干什么：解决均匀分配的问题，`在数据和节点之间又加入了一层，把这层称为哈希槽（slot），用于管理数据和节点之间的关系`，现在就相当于节点上放的是槽，槽里放的是数据。
 
+   <img src="README.assets/image-20220519092948806.png" alt="image-20220519092948806" style="zoom:67%;" /> 
 
+   槽解决的是粒度问题，相当于把粒度变大了，这样便于数据移动。
+   哈希解决的是映射问题，使用key的哈希值来计算所在的槽，便于数据分配。
 
+   一个集群只能有16384个槽，编号0-16383（0-2^14-1）。这些槽会分配给集群中的所有主节点，分配策略没有要求。可以指定哪些编号的槽分配给哪个主节点。集群会记录节点和槽的对应关系。解决了节点和槽的关系后，接下来就需要对key求哈希值，然后对16384取余，余数是几key就落入对应的槽里。slot = CRC16(key) % 16384。以槽为单位移动数据，因为槽的数目是固定的，处理起来比较容易，这样数据移动问题就解决了。
 
+   1. 哈希槽计算
 
+      Redis 集群中内置了 16384 个哈希槽，redis 会根据节点数量大致均等的将哈希槽映射到不同的节点。当需要在 Redis 集群中放置一个 key-value时，redis 先对 key 使用 crc16 算法算出一个结果，然后把结果对 16384 求余数，这样每个 key 都会对应一个编号在 0-16383 之间的哈希槽，也就是映射到某个节点上。如下代码，key之A 、B在Node2， key之C落在Node3上
 
+      <img src="README.assets/image-20220519093826763.png" alt="image-20220519093826763" style="zoom:67%;" /> 
+
+      <img src="README.assets/image-20220519093838726.png" alt="image-20220519093838726" style="zoom: 80%;" /> 
+
+### 2-2、Redis集群(3主3从)配置
+
+> 前提：关闭防火墙(6381~6386)+启动docker后台服务
+
+```shell
+# 查看已开放防火墙的端口
+[root@localhost ~]# firewall-cmd --zone=public --list-ports
+8010/tcp 8080/tcp 8081/tcp 8082/tcp 9001/tcp 80/tcp 15672/tcp 5672/tcp 6379/tcp 8801/tcp 1111/tcp 3333/tcp 4444/tcp 5555/tcp 3308/tcp 3307/tcp
+# 批量开放端口6381-6386
+[root@localhost ~]# firewall-cmd --zone=public --add-port=6381-6386/tcp --permanent
+success
+# 重启更新防火墙设置
+[root@localhost ~]# firewall-cmd --reload
+success
+```
+
+1. 新建6个docker容器redis实例
+
+   ```shell
+   docker run -d --name redis-node-1 --net host --privileged=true -v /data/redis/share/redis-node-1:/data redis:6.0.8 --cluster-enabled yes --appendonly yes --port 6381
+    
+   docker run -d --name redis-node-2 --net host --privileged=true -v /data/redis/share/redis-node-2:/data redis:6.0.8 --cluster-enabled yes --appendonly yes --port 6382
+    
+   docker run -d --name redis-node-3 --net host --privileged=true -v /data/redis/share/redis-node-3:/data redis:6.0.8 --cluster-enabled yes --appendonly yes --port 6383
+    
+   docker run -d --name redis-node-4 --net host --privileged=true -v /data/redis/share/redis-node-4:/data redis:6.0.8 --cluster-enabled yes --appendonly yes --port 6384
+    
+   docker run -d --name redis-node-5 --net host --privileged=true -v /data/redis/share/redis-node-5:/data redis:6.0.8 --cluster-enabled yes --appendonly yes --port 6385
+    
+   docker run -d --name redis-node-6 --net host --privileged=true -v /data/redis/share/redis-node-6:/data redis:6.0.8 --cluster-enabled yes --appendonly yes --port 6386
+   
+   [root@localhost ~]# docker ps
+   CONTAINER ID   IMAGE         COMMAND                  CREATED          STATUS         PORTS                                                  NAMES
+   429b1d9f0d12   redis:6.0.8   "docker-entrypoint.s…"   3 seconds ago    Up 2 seconds                                                          redis-node-6
+   bd6c733a20a1   redis:6.0.8   "docker-entrypoint.s…"   8 seconds ago    Up 6 seconds                                                          redis-node-5
+   35c3e6a5d6b8   redis:6.0.8   "docker-entrypoint.s…"   8 seconds ago    Up 7 seconds                                                          redis-node-4
+   ac5f0f42b6bd   redis:6.0.8   "docker-entrypoint.s…"   8 seconds ago    Up 8 seconds                                                          redis-node-3
+   569027a164af   redis:6.0.8   "docker-entrypoint.s…"   9 seconds ago    Up 8 seconds                                                          redis-node-2
+   e474d13e0eee   redis:6.0.8   "docker-entrypoint.s…"   12 seconds ago   Up 9 seconds                                                          redis-node-1
+   ```
+
+   命令解释：
+
+   1. docker run 创建并运行docker容器实例
+   2. --name redis-node-6 容器名字
+   3. --net host 使用宿主机的IP和端口，默认
+   4. --privileged=true 获取宿主机root用户权限
+   5. -v /data/redis/share/redis-node-6:/data 容器卷，宿主机地址:docker内部地址
+   6. redis:6.0.8 redis镜像和版本号
+   7. --cluster-enabled yes 开启redis集群
+   8. --appendonly yes 开启持久化
+   9. --port 6386 redis端口号
+
+2. 进入容器redis-node-1并为6台机器构建集群关系
+
+   ```shell
+   [root@localhost ~]# docker exec -it redis-node-1 /bin/bash
+   ```
+
+   <img src="README.assets/image-20220519104126818.png" alt="image-20220519104126818" style="zoom:80%;" /> 
+
+   > redis-cli --cluster create 10.1.53.169:6381 10.1.53.169:6382 10.1.53.169:6383 10.1.53.169:6384 10.1.53.169:6385 10.1.53.169:6386 --cluster-replicas 1
+
+   `--cluster-replicas 1 表示为每个master创建一个slave节点`
+
+   3主3从集群完成
+
+3. 链接进入6381作为切入点，查看集群状态
+
+   > redis-cli -p 6381
+   >
+   > cluster info 查看集群信息
+   >
+   > cluster nodes 查看集群节点信息
+
+   <img src="README.assets/image-20220519104957037.png" alt="image-20220519104957037" style="zoom:80%;" /> 
+
+   master 6381 —— slave 6385
+
+   master 6382 —— slave 6386
+
+   master 6383 —— slave 6384
+
+### 2-3、主从容错切换迁移案例
+
+#### 2-3-1、数据读写存储
+
+1. 启动`6机`构成的集群并通过exec进入
+
+   ```shell
+   [root@localhost ~]# docker exec -it redis-node-1 /bin/bash
+   root@localhost:/data# redis-cli -p 6381
+   ```
+
+2. 对6381新增两个key
+
+   ```shell
+   127.0.0.1:6381> keys *
+   (empty array)
+   127.0.0.1:6381> set k1 v1
+   # 报错由于k1计算哈希值后为12706 6381端口的的哈希槽范围为（0-5360）
+   (error) MOVED 12706 10.1.53.169:6383
+   
+   # 解决：防止路由失效加参数-c连接redis集群并新增两个key
+   root@localhost:/data# redis-cli -p 6381 -c
+   127.0.0.1:6381> keys *
+   (empty array)
+   127.0.0.1:6381> set k1 v1
+   -> Redirected to slot [12706] located at 10.1.53.169:6383
+   OK
+   10.1.53.169:6383> set k2 v2
+   -> Redirected to slot [449] located at 10.1.53.169:6381
+   OK
+   ```
+
+3. 查看集群信息
+
+   > redis-cli --cluster check 10.1.53.169:6381
+
+   <img src="README.assets/image-20220519142731960.png" alt="image-20220519142731960" style="zoom:80%;" /> 
+
+#### 2-3-2、容错切换迁移
+
+1. 原本master 6381 —— slave 6385
+
+   ```shell
+   34b0b40df3deb54f029dd2b1a5c7d2839288e430 10.1.53.169:6381@16381 myself,master - 0 1652941775000 1 connected 0-5460
+   c253a6c8fc40a0aa584f555e132242fe0475e943 10.1.53.169:6385@16385 slave 34b0b40df3deb54f029dd2b1a5c7d2839288e430 0 1652941775000 1 connected
+   ```
+
+2. 主6381和从机切换，先停止主机6381
+
+   ```shell
+   [root@localhost ~]# docker stop redis-node-1
+   redis-node-1
+   [root@localhost ~]# docker exec -it redis-node-2 bash
+   root@localhost:/data# redis-cli -p 6382 -c
+   127.0.0.1:6382> cluster nodes
+   ```
+
+3. 6381宕机了，6385上位成为了新的master。
+
+   ```shell
+   34b0b40df3deb54f029dd2b1a5c7d2839288e430 10.1.53.169:6381@16381 master,fail - 1652941816977 1652941812000 1 disconnected
+   c253a6c8fc40a0aa584f555e132242fe0475e943 10.1.53.169:6385@16385 master - 0 1652941866000 7 connected 0-5460
+   ```
+
+4. 前面存的k1和k2正常存在
+
+   ```shell
+   127.0.0.1:6382> get k1
+   -> Redirected to slot [12706] located at 10.1.53.169:6383
+   "v1"
+   10.1.53.169:6383> get k2
+   -> Redirected to slot [449] located at 10.1.53.169:6385
+   "v2"
+   ```
+
+5. 先还原之前的3主3从,启动6381
+
+   ```shell
+   [root@localhost ~]# docker start redis-node-1
+   redis-node-1
+   10.1.53.169:6385> cluster nodes
+   c253a6c8fc40a0aa584f555e132242fe0475e943 10.1.53.169:6385@16385 myself,master - 0 1652942460000 7 connected 0-5460
+   34b0b40df3deb54f029dd2b1a5c7d2839288e430 10.1.53.169:6381@16381 slave c253a6c8fc40a0aa584f555e132242fe0475e943 0 1652942463000 7 connected
+   ...
+   ```
+
+   6385仍是主机，6381成为6385的从机
+
+6. 我们现在恢复6381为主机，6385为从机，先关闭6385在启动6385即可
+
+7. 查看集群状态
+
+   ```shell
+   root@localhost:/data# redis-cli --cluster check 10.1.53.169:6381
+   ```
+
+   <img src="README.assets/image-20220519144634127.png" alt="image-20220519144634127" style="zoom:80%;" /> 
+
+### 2-4、主从扩容案例
+
+1. 新建6387、6388两个节点+新建后启动+查看是否8节点
+
+   ```shell
+   [root@localhost ~]# docker run -d --name redis-node-7 --net host --privileged=true -v /data/redis/share/redis-node-7:/data redis:6.0.8 --cluster-enabled yes --appendonly yes --port 6387
+   f7e6abd2fdba344f52e38a593719daa3e45f4bdb8777d22ab8b73a4e62a29112
+   [root@localhost ~]# docker run -d --name redis-node-8 --net host --privileged=true -v /data/redis/share/redis-node-8:/data redis:6.0.8 --cluster-enabled yes --appendonly yes --port 6388
+   cc1b08da3ca5c8244a4d63b5f890a2ba73f879d09c65d1b7044f54aebf8ad7f2
+   ```
+
+   <img src="README.assets/image-20220519150019486.png" alt="image-20220519150019486" style="zoom: 80%;" /> 
+
+2. 进入6387容器实例内部
+
+   ```shell
+   [root@localhost ~]# docker exec -it redis-node-7 /bin/bash
+   root@localhost:/data# 
+   ```
+
+3. 将新增的6387节点(空槽号)作为master节点加入原集群
+
+   > 将新增的6387作为master节点加入集群
+   > `redis-cli --cluster add-node 自己实际IP地址:6387 自己实际IP地址:6381`
+   >
+   > 6387 就是将要作为master新增节点
+   > 6381 就是原来集群节点里面的领路人，相当于6387通过6381从而找到组织加入集群
+
+   ```shell
+   root@localhost:/data# root@localhost:/data# redis-cli --cluster add-node 10.1.53.169:6387 10.1.53.169:6381
+   >>> Adding node 10.1.53.169:6387 to cluster 10.1.53.169:6381
+   >>> Performing Cluster Check (using node 10.1.53.169:6381)
+   ...
+   ```
+
+4. 检查集群情况
+
+   ```shell
+   root@localhost:/data# redis-cli --cluster check 10.1.53.169:6381
+   ```
+
+   <img src="README.assets/image-20220519151631457.png" alt="image-20220519151631457" style="zoom:80%;" />  
+
+   6387没有分配到哈希槽
+
+5. 重新分派槽号
+
+   > 命令:redis-cli --cluster reshard IP地址:端口号
+
+   ```shell
+   root@localhost:/data# redis-cli --cluster reshard 10.1.53.169:6381
+   ....
+   How many slots do you want to move (from 1 to 16384)?4096
+   What is the receiving node ID?6ade1f47c9b8011d9abae7e45b38e3a33df289aa
+   Please enter all the source node IDs.
+     Type 'all' to use all the nodes as source nodes for the hash slots.
+     Type 'done' once you entered all the source nodes IDs.
+   Source node #1: all
+   ```
+
+   > How many slots do you want to move (from 1 to 16384)?
+
+   最后需要自己分配集群的槽位（16384/4=4096）所以这里输入4096
+
+   > What is the receiving node ID?
+
+   分配给哪个新机器，这里输入新机器的ID，6387的id：6ade1f47c9b8011d9abae7e45b38e3a33df289aa
+
+   > Please enter all the source node IDs.
+   >
+   > ...
+   >
+   > Source node #1: 
+
+   这里输入all选择所有节点重新分配
+
+6. 再次检查集群情况
+
+   ```shell
+   root@localhost:/data# redis-cli --cluster check 10.1.53.169:6381
+   ```
+
+   <img src="README.assets/image-20220519152036992.png" alt="image-20220519152036992" style="zoom: 80%;" /> 
+
+   > 这里可以发现6387的槽位分为了三块[0-1364],[5461-6826],[10923-12287]
+
+   原因：重新分配成本太高，所以前3家各自匀出来一部分，从6381/6382/6383三个旧节点分别匀出1364个坑位给新节点6387
+
+   原本					现在：
+
+   1. 6381：0-5460			6381：1365-5460（从开头0分出[0-1364]给6387）
+   2. 6382：5361-10922    	6382：6827-10922（从开头5361分出[5461-6826]）
+   3. 6383：10923-16383		6383：12288-16383（从开头10923分出[10923-12287])
+
+7. 为主节点6387分配从节点6388
+
+   > redis-cli --cluster add-node ip:新slave端口 ip:新master端口 --cluster-slave --cluster-master-id 新主机节点ID
+
+   ```shell
+   root@localhost:/data# redis-cli --cluster add-node 10.1.53.169:6388 10.1.53.169:6387 --cluster-slave --cluster-master-id 6ade1f47c9b8011d9abae7e45b38e3a33df289aa
+   ```
+
+8. 再再次检查集群情况
+
+   <img src="README.assets/image-20220519153516303.png" alt="image-20220519153516303" style="zoom:80%;" /> 
+
+9. 存值情况
+
+   > 原本k2存储在6381的槽位，现在449的槽位分给了6387
+
+   ```shell
+   10.1.53.169:6383> get k2
+   -> Redirected to slot [449] located at 10.1.53.169:6387
+   "v2"
+   10.1.53.169:6387>
+   ```
+
+### 2-5、主从缩容案例
+
+> 目的：6387和6388下线
+>
+> 思路：
+>
+> 1. 先清除从节点6388
+> 2. 清出来的槽号重新分配
+> 3. 再删除6487主节点
+
+1. 检查集群情况1获得6388的节点ID
+
+   ```shell
+   root@localhost:/data# redis-cli --cluster check 10.1.53.169:6382
+   ```
+
+   <img src="README.assets/image-20220519185052366.png" alt="image-20220519185052366" style="zoom:80%;" /> 
+
+   1ee3fa5fb7fffd6a15d8bdf1ec71fe3e2e4ec326
+
+2. 将从机6388删除,从集群中将4号从节点6388删除
+
+   > 命令：redis-cli --cluster del-node ip:从机端口 从机6388节点ID
+
+   ```shell
+   root@localhost:/data# redis-cli --cluster del-node 10.1.53.169:6388 1ee3fa5fb7fffd6a15d8bdf1ec71fe3e2e4ec326
+   >>> Removing node 1ee3fa5fb7fffd6a15d8bdf1ec71fe3e2e4ec326 from cluster 10.1.53.169:6388
+   >>> Sending CLUSTER FORGET messages to the cluster...
+   >>> Sending CLUSTER RESET SOFT to the deleted node.
+   # 查看集群情况 确保6388被删除
+   root@localhost:/data# redis-cli --cluster check 10.1.53.169:6382
+   ```
+
+   <img src="README.assets/image-20220519185426419.png" alt="image-20220519185426419" style="zoom:80%;" /> 
+
+   删除成功，只剩下七个节点
+
+3. 将6387的槽号清空，重新分配，本例将清出来的槽号都给6381
+
+   ```shell
+   root@localhost:/data# redis-cli --cluster reshard 10.1.53.169:6381
+   ```
+
+   <img src="README.assets/image-20220519195555227.png" alt="image-20220519195555227" style="zoom:80%;" /> 
+
+4. 再次检查集群情况
+
+   ```shell
+   root@localhost:/data# redis-cli --cluster check 10.1.53.169:6382
+   ```
+
+   <img src="README.assets/image-20220519195815094.png" alt="image-20220519195815094" style="zoom:80%;" /> 
+
+5. 将6387删除
+
+   > 命令：redis-cli --cluster del-node ip:端口 6387节点ID
+
+   ```shell
+   root@localhost:/data# redis-cli --cluster del-node 10.1.53.169:6387 6ade1f47c9b8011d9abae7e45b38e3a33df289aa
+   >>> Removing node 6ade1f47c9b8011d9abae7e45b38e3a33df289aa from cluster 10.1.53.169:6387
+   >>> Sending CLUSTER FORGET messages to the cluster...
+   >>> Sending CLUSTER RESET SOFT to the deleted node.
+   ```
+
+6. 再次检查集群情况
+
+   ```shell
+   root@localhost:/data# redis-cli --cluster check 10.1.53.169:6381 
+   ```
+
+   <img src="README.assets/image-20220519200033143.png" alt="image-20220519200033143" style="zoom:80%;" /> 
+
+   只剩下六个节点了
+
+### 2-6、总结
+
+> 主从扩容流程：
+>
+> 1. 新建两个新节点
+> 2. 将一个节点作为主节点加入到集群内
+> 3. 给新的主节点分配n个槽位(n=总槽位/主节点数),分配规则其他所有节点都会分出(n/主节点数)个槽位给新的主节点
+> 4. 为主节点分配从节点
+
+> 主从缩容流程：
+>
+> 1. 先删除从节点
+> 2. 将准备删除的主节点的槽号都清出来的槽号重新分配（采用统一分给一个节点的方式）
+> 3. 再删除主节点
 
 
 
