@@ -3072,6 +3072,58 @@ Total reclaimed space: 0B
    }
    ```
 
+## 2、通过dockerfile发布微服务部署到docker容器
+
+### 1、IDEA工具里面搞定微服务jar包
+
+1. 项目打包
+
+   <img src="README.assets/image-20220521230739523.png" alt="image-20220521230739523" style="zoom: 50%;" /> 
+
+   <img src="README.assets/image-20220521230824700.png" alt="image-20220521230824700" style="zoom:50%;" /> 
+
+2. 在target中可以看见jar包
+
+   <img src="README.assets/image-20220521230847606.png" alt="image-20220521230847606" style="zoom:50%;" /> 
+
+3. 把jar包复制到/mydocker
+
+   <img src="README.assets/image-20220521232132042.png" alt="image-20220521232132042" style="zoom:50%;" /> 
+
+### 2、编写Dockerfile
+
+```dockerfile
+# 基础镜像使用java
+FROM java:8
+# 作者
+MAINTAINER lambert
+# VOLUME 指定临时文件目录为/tmp，在主机/var/lib/docker目录下创建了一个临时文件并链接到容器的/tmp
+VOLUME /tmp
+# 将jar包添加到容器中并更名为zzyy_docker.jar
+ADD docker_boot-0.0.1-SNAPSHOT.jar lambert_docker.jar
+# 运行jar包
+RUN bash -c 'touch /lambert_docker.jar'
+ENTRYPOINT ["java","-jar","/lambert_docker.jar"]
+#暴露6001端口作为微服务
+EXPOSE 6001
+```
+
+### 3、构建镜像
+
+```shell
+[root@localhost mydocker]# docker build -t lambert_docker:1.1 .
+```
+
+### 4、运行容器
+
+```shell
+[root@localhost mydocker]# docker run -d -p 6001:6001 lambert_docker:1.1
+```
+
+### 5、访问测试
+
+<img src="README.assets/image-20220521234208597.png" alt="image-20220521234208597" style="zoom: 67%;" /> 
+
 
 
 
