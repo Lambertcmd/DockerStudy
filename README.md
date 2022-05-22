@@ -3311,7 +3311,28 @@ EXPOSE 6001
 
 ### 5-1、bridge
 
+> Docker 服务默认会创建一个 docker0 网桥（其上有一个 docker0 内部接口），该桥接网络的名称为docker0，它在`内核层`连通了其他的物理或虚拟网卡，这就将所有容器和本地主机都放到`同一个物理网络`。Docker 默认指定了 docker0 接口 的 IP 地址和子网掩码，`让主机和容器之间可以通过网桥相互通信`。
+>
 
+```shell
+# 查看 bridge 网络的详细信息
+[root@localhost ~]# docker network inspect bridge
+
+# 查看 bridge 网络的详细信息，并通过 grep 获取名称项
+[root@localhost ~]# docker network inspect bridge | grep name
+            "com.docker.network.bridge.name": "docker0",
+
+[root@localhost ~]# ifconfig | grep docker
+docker0: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500
+```
+
+1. Docker使用Linux桥接，在宿主机虚拟一个Docker容器网桥(docker0)，Docker启动一个容器时会根据Docker网桥的网段分配给容器一个IP地址，称为Container-IP，同时Docker网桥是每个容器的默认网关。因为在同一宿主机内的容器都接入同一个网桥，这样容器之间就能够通过容器的Container-IP直接通信。
+2. docker run 的时候，没有指定network的话默认使用的网桥模式就是bridge，使用的就是docker0。在宿主机ifconfig,就可以看到docker0和自己create的network(后面讲)eth0，eth1，eth2……代表网卡一，网卡二，网卡三……，lo代表127.0.0.1，即localhost，inet addr用来表示网卡的IP地址
+3. 网桥docker0创建一对对等虚拟设备接口一个叫veth，另一个叫eth0，成对匹配。
+   1. 整个宿主机的网桥模式都是docker0，类似一个交换机有一堆接口，每个接口叫veth，在本地主机和容器内分别创建一个虚拟接口，并让他们彼此联通（这样一对接口叫veth pair）；
+   2. 每个容器实例内部也有一块网卡，每个接口叫eth0；
+   3. docker0上面的每个veth匹配某个容器实例内部的eth0，两两配对，一一匹配。
+      通过上述，将宿主机上的所有容器都连接到这个内部网络上，两个容器在同一个网络下,会从这个网关下各自拿到分配的ip，此时两个容器的网络是互通的。
 
 
 
