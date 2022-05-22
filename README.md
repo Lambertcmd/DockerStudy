@@ -3124,7 +3124,192 @@ EXPOSE 6001
 
 <img src="README.assets/image-20220521234208597.png" alt="image-20220521234208597" style="zoom: 67%;" /> 
 
+# 十二、Docker网络
 
+## 1、Docker网络是什么
+
+网络情况：
+
+<img src="README.assets/image-20220522163654159.png" alt="image-20220522163654159" style="zoom: 80%;" /> 
+
+会产生一个名为docker0的虚拟网桥
+
+默认创建3大网络模式：
+
+```shell
+[root@localhost ~]# docker network ls
+```
+
+![image-20220522163801800](README.assets/image-20220522163801800.png) 
+
+
+
+## 2、常用基本命令
+
+1. All命令
+
+   ```shell
+   [root@localhost ~]# docker network --help
+   
+   Usage:  docker network COMMAND
+   
+   Manage networks
+   
+   Commands:
+     connect     Connect a container to a network
+     create      Create a network
+     disconnect  Disconnect a container from a network
+     inspect     Display detailed information on one or more networks
+     ls          List networks
+     prune       Remove all unused networks
+     rm          Remove one or more networks
+   
+   Run 'docker network COMMAND --help' for more information on a command.
+   ```
+
+2. 查看网络
+
+   ```shell
+   [root@localhost ~]# docker network ls
+   NETWORK ID     NAME      DRIVER    SCOPE
+   05f3c8823b5d   bridge    bridge    local
+   dc463e83050b   host      host      local
+   f9d1acebf2b6   none      null      local
+   ```
+
+3. 查看网络源数据
+
+   > docker network inspect  XXX网络名字
+
+4. 删除网络
+
+   > docker network rm XXX网络名字
+
+5. 案例
+
+   ![image-20220522164410232](README.assets/image-20220522164410232.png) 
+
+## 3、能干嘛
+
+> 容器间的互联和通信以及端口映射
+>
+> 容器IP变动时候可以通过服务名直接网络通信而不受到影响
+
+## 4、网络模式
+
+### 4-1、总体介绍
+
+1. bridge模式：为每个容器分配、设置IP等，并将容器连接到一个docker0，虚拟网桥，`默认为该模式`
+
+   使用`--network bridge`指定，`默认使用docker0`
+
+2. host模式：容器将不会虚拟出自己的网卡，配置自己的IP等，而是使用宿主机的IP和端口
+
+   使用`--network host`指定
+
+3. none模式：容器有独立的Network namespace 但并没有对其进行任何网络设置，如分配veth pair和网桥连接，IP
+
+   使用`--network none`指定
+
+4. container模式：新创建的容器不会创建自己的网卡和配置自己的IP，而是和一个指定的容器共享IP、端口范围等
+
+   使用`--network container:NAME或者容器ID`指定
+
+### 4-2、容器实例内默认网络IP生产规则
+
+1. 先启动两个ubuntu容器实例
+
+   ```shell
+   [root@localhost ~]# docker run -it --name u1 ubuntu bash
+   [root@localhost ~]# docker run -it --name u2 ubuntu bash
+   ```
+
+2. 查看容器详细信息
+
+   ```shell
+   #查看最后20行
+   [root@localhost ~]# docker inspect u1|tail -n 20
+               "Networks": {
+                   "bridge": {
+                       "IPAMConfig": null,
+                       "Links": null,
+                       "Aliases": null,
+                       "NetworkID": "dd462ddcb38f0dedf85461c75d391911c4f913f1092448f0479428d33b6a5a00",
+                       "EndpointID": "b9aed324497deaf349758497a4c2dfec29ca6f57fce1088f6e5514350b977689",
+                       "Gateway": "172.17.0.1",
+                       "IPAddress": "172.17.0.2",
+                       "IPPrefixLen": 16,
+                       "IPv6Gateway": "",
+                       "GlobalIPv6Address": "",
+                       "GlobalIPv6PrefixLen": 0,
+                       "MacAddress": "02:42:ac:11:00:02",
+                       "DriverOpts": null
+                   }
+               }
+           }
+       }
+   ]
+   [root@localhost ~]# docker inspect u2|tail -n 20
+               "Networks": {
+                   "bridge": {
+                       "IPAMConfig": null,
+                       "Links": null,
+                       "Aliases": null,
+                       "NetworkID": "dd462ddcb38f0dedf85461c75d391911c4f913f1092448f0479428d33b6a5a00",
+                       "EndpointID": "10f900e2cb1bcb83114e23dc43eeae3fda8c4c62d020c3efa115e3a901685182",
+                       "Gateway": "172.17.0.1",
+                       "IPAddress": "172.17.0.3",
+                       "IPPrefixLen": 16,
+                       "IPv6Gateway": "",
+                       "GlobalIPv6Address": "",
+                       "GlobalIPv6PrefixLen": 0,
+                       "MacAddress": "02:42:ac:11:00:03",
+                       "DriverOpts": null
+                   }
+               }
+           }
+       }
+   ]
+   ```
+
+   u1的IP:`172.17.0.2` u2的IP：`172.17.0.3`
+
+3. 关闭u2实例，新建u3，查看ip变化
+
+   ```shell
+   [root@localhost ~]# docker inspect u3|tail -n 20
+               "Networks": {
+                   "bridge": {
+                       "IPAMConfig": null,
+                       "Links": null,
+                       "Aliases": null,
+                       "NetworkID": "dd462ddcb38f0dedf85461c75d391911c4f913f1092448f0479428d33b6a5a00",
+                       "EndpointID": "bdf7feb6cfad783468aa6f893fae751047f45157ae8a7b00008b09d5b27b1d14",
+                       "Gateway": "172.17.0.1",
+                       "IPAddress": "172.17.0.3",
+                       "IPPrefixLen": 16,
+                       "IPv6Gateway": "",
+                       "GlobalIPv6Address": "",
+                       "GlobalIPv6PrefixLen": 0,
+                       "MacAddress": "02:42:ac:11:00:03",
+                       "DriverOpts": null
+                   }
+               }
+           }
+       }
+   ]
+   
+   ```
+
+   u3的IP：`172.17.0.3`
+
+   > 容器的IP连接到
+
+4. 结论:docker容器内部的ip是有可能会发生改变的
+
+## 5、案例说明
+
+### 5-1、bridge
 
 
 
