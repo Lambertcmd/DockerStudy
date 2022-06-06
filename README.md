@@ -3311,8 +3311,9 @@ EXPOSE 6001
 
 ### 5-1、bridge
 
-> Docker 服务默认会创建一个 docker0 网桥（其上有一个 docker0 内部接口），该桥接网络的名称为docker0，它在`内核层`连通了其他的物理或虚拟网卡，这就将所有容器和本地主机都放到`同一个物理网络`。Docker 默认指定了 docker0 接口 的 IP 地址和子网掩码，`让主机和容器之间可以通过网桥相互通信`。
+> 为每个容器分配、设置IP等，并将容器连接到一个docker0，虚拟网桥，`默认为该模式`
 >
+> Docker 服务默认会创建一个 docker0 网桥（其上有一个 docker0 内部接口），该桥接网络的名称为docker0，它在`内核层`连通了其他的物理或虚拟网卡，这就将所有容器和本地主机都放到`同一个物理网络`。Docker 默认指定了 docker0 接口 的 IP 地址和子网掩码，`让主机和容器之间可以通过网桥相互通信`。
 
 ```shell
 # 查看 bridge 网络的详细信息
@@ -3334,15 +3335,1347 @@ docker0: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500
    3. docker0上面的每个veth匹配某个容器实例内部的eth0，两两配对，一一匹配。
       通过上述，将宿主机上的所有容器都连接到这个内部网络上，两个容器在同一个网络下,会从这个网关下各自拿到分配的ip，此时两个容器的网络是互通的。
 
+实例验证
+
+```shell
+[root@localhost ~]# docker run -d -p 8081:8080   --name tomcat81 billygoo/tomcat8-jdk8
+1353d250cb2c1fa25db4e1e3894cf1307b99ecd457112b833387589bc7c199bc
+[root@localhost ~]# docker run -d -p 8082:8080   --name tomcat82 billygoo/tomcat8-jdk8
+0483d0b968c63cf10d8b5019f22388bbf58a4af7f5008c5ac872790870dba8d5
+```
+
+ <img src="README.assets/image-20220523085712747.png" alt="image-20220523085712747" style="zoom:80%;" /> 
+
+宿主机多了两个叫veth的网络，一个122连接`121网络`，一个124连接123容器
+
+进入tomcat81查看网络
+
+```shell
+[root@localhost ~]# docker exec -it tomcat81 bash
+root@1353d250cb2c:/usr/local/tomcat# ip addr
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+121: eth0@if122: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default 
+    link/ether 02:42:ac:11:00:04 brd ff:ff:ff:ff:ff:ff link-netnsid 0
+    inet 172.17.0.4/16 brd 172.17.255.255 scope global eth0
+       valid_lft forever preferred_lft forever
+```
+
+tomcat有个121网络,所以这是宿主机连接容器的网络
+
+tomcat82也一样：
+
+```shell
+root@0483d0b968c6:/usr/local/tomcat# ip addr
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+123: eth0@if124: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default 
+    link/ether 02:42:ac:11:00:05 brd ff:ff:ff:ff:ff:ff link-netnsid 0
+    inet 172.17.0.5/16 brd 172.17.255.255 scope global eth0
+       valid_lft forever preferred_lft forever
+```
+
+### 5-2、host
+
+> host：直接使用宿主机的 IP 地址与外界进行通信，不再需要额外进行NAT 转换。
+
+容器将不会获得一个独立的Network Namespace， 而是和宿主机共用一个Network Namespace。`容器将不会虚拟出自己的网卡而是使用宿主机的IP和端口。`
+
+<img src="README.assets/image-20220523090407549.png" alt="image-20220523090407549" style="zoom:80%;" /> 
+
+**启动容器的代码：**
+
+```shell
+[root@localhost ~]# docker run -d -p 8083:8080 --network host --name tomcat83 billygoo/tomcat8-jdk8
+WARNING: Published ports are discarded when using host network mode
+```
+
+问题：WARNING: Published ports are discarded when using host network mode
+
+原因：docker启动时指定--network=host或-net=host，如果还指定了-p映射端口，那这个时候就会有此警告，并且通过-p设置的参数将不会起到任何作用，端口号会以主机端口号为主，重复时则递增。
+
+正确的方式：
+
+```shell
+[root@localhost ~]# docker run -d --network host --name tomcat83 billygoo/tomcat8-jdk8
+7eaf78c2508d8d3586bb2ec57c6f7b4d2c10c64423fa023d372320ca16dcbb04
+```
+
+**网络信息无之前的配对显示了，看容器网络信息：**
+
+<img src="README.assets/image-20220523091014640.png" alt="image-20220523091014640" style="zoom: 80%;" /> 
+
+查看tomcat83容器内部的网络信息：
+
+<img src="README.assets/image-20220523091340188.png" alt="image-20220523091340188" style="zoom:80%;" /> 
+
+直接使用宿主机的网络，网络信息和宿主机的网络一样
+
+> 没有设置-p的端口映射了，如何访问启动的tomcat83？？
+
+http://宿主机IP:8080/
+
+在CentOS里面用默认的火狐浏览器访问容器内的tomcat83看到访问成功，因为此时容器的IP借用主机的，
+所以容器共享宿主机网络IP，这样的好处是外部主机与容器可以直接通信。
+
+### 5-3、none
+
+> 在none模式下，`并不为Docker容器进行任何网络配置`。也就是说，这个Docker容器没有网卡、IP、路由等信息，只有一个lo`需要我们自己为Docker容器添加网卡、配置IP等。`
+
+禁用网络功能，只有lo标识(就是127.0.0.1表示本地回环)
+
+启动代码：
+
+```shell
+[root@localhost ~]# docker run -d -p 8084:8080 --network none --name tomcat84 billygoo/tomcat8-jdk8
+```
+
+外部查看容器网络信息：
+
+<img src="README.assets/image-20220523092952111.png" alt="image-20220523092952111" style="zoom: 80%;" /> 
+
+内部查看容器网络信息：
+
+```shell
+root@9a158496a4c7:/usr/local/tomcat# ip addr
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+```
+
+只有一个lo网络
+
+### 5-4、container
+
+> 新建的容器和已经存在的一个容器共享一个网络ip配置而不是和宿主机共享。新创建的容器不会创建自己的网卡，配置自己的IP，而是和一个指定的容器共享IP、端口范围等。同样，两个容器除了网络方面，其他的如文件系统、进程列表等还是隔离的。
+
+<img src="README.assets/image-20220523093314013.png" alt="image-20220523093314013" style="zoom:80%;" />
+
+> 错误案例
+
+```shell
+[root@localhost ~]# docker run -d -p 8085:8080 --name tomcat85 billygoo/tomcat8-jdk8
+de16b50d8d1531b41f18588dd563455105ffd65170b30ed87e978e1d8a9ed382
+[root@localhost ~]# docker run -d -p 8086:8080 --network container:tomcat85 --name tomcat86 billygoo/tomcat8-jdk8
+docker: Error response from daemon: conflicting options: port publishing and the container type network mode.
+```
+
+由于tomcat86和tomcat85公用同一个ip同一个端口，导致端口冲突
+
+> 正确案例
+
+Alpine操作系统是一个面向安全的轻型 Linux发行版
+
+Alpine Linux 是一款独立的、非商业的通用 Linux 发行版，专为追求安全性、简单性和资源效率的用户而设计。 可能很多人没听说过这个 Linux 发行版本，但是经常用 Docker 的朋友可能都用过，因为他小，简单，安全而著称，所以作为基础镜像是非常好的一个选择，可谓是麻雀虽小但五脏俱全，镜像非常小巧，不到 6M的大小，所以特别适合容器打包。
+
+```shell
+[root@localhost ~]# docker run -it --name alpine1 alpine /bin/sh
+Unable to find image 'alpine:latest' locally
+latest: Pulling from library/alpine
+59bf1c3509f3: Pull complete 
+Digest: sha256:21a3deaa0d32a8057914f36584b5288d2e5ecc984380bc0118285c70fa8c9300
+Status: Downloaded newer image for alpine:latest
+/ # 
+
+```
+
+```shell
+[root@localhost ~]# docker run -it --network container:alpine1 --name alpine2  alpine /bin/sh
+/ # 
+```
+
+验证是否共用同一个IP网桥
+
+<img src="README.assets/image-20220523094027056.png" alt="image-20220523094027056" style="zoom:80%;" /> 
+
+<img src="README.assets/image-20220523094047738.png" alt="image-20220523094047738" style="zoom:80%;" /> 
+
+假如此时关闭alpine1，再看看alpine2
+
+```shell
+/ # ip addr
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft foreve
+```
+
+### 5-5、自定义网络
+
+过时的link：
+
+<img src="README.assets/image-20220523102043851.png" alt="image-20220523102043851" style="zoom:80%;" /> 
+
+> 案例
+
+1. 不使用自定义网络
+
+   ```shell
+   [root@localhost ~]# docker run -d -p 8081:8080   --name tomcat81 billygoo/tomcat8-jdk8
+   [root@localhost ~]# docker run -d -p 8082:8080   --name tomcat82 billygoo/tomcat8-jdk8
+   ```
+
+   上述成功启动并用docker exec进入各自容器实例内部
+
+   问题：
+
+   - 按照IP地址ping是OK的
+
+     ```SHELL
+     root@1353d250cb2c:/usr/local/tomcat# ip addr
+     1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+         link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+         inet 127.0.0.1/8 scope host lo
+            valid_lft forever preferred_lft forever
+     121: eth0@if122: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default 
+         link/ether 02:42:ac:11:00:04 brd ff:ff:ff:ff:ff:ff link-netnsid 0
+         inet 172.17.0.4/16 brd 172.17.255.255 scope global eth0
+            valid_lft forever preferred_lft forever
+     root@1353d250cb2c:/usr/local/tomcat# ping 172.17.0.5
+     PING 172.17.0.5 (172.17.0.5) 56(84) bytes of data.
+     64 bytes from 172.17.0.5: icmp_seq=1 ttl=64 time=0.251 ms
+     64 bytes from 172.17.0.5: icmp_seq=2 ttl=64 time=0.050 ms
+     64 bytes from 172.17.0.5: icmp_seq=3 ttl=64 time=0.048 ms
+     64 bytes from 172.17.0.5: icmp_seq=4 ttl=64 time=0.049 ms
+     64 bytes from 172.17.0.5: icmp_seq=5 ttl=64 time=0.118 ms
+     64 bytes from 172.17.0.5: icmp_seq=6 ttl=64 time=0.058 ms
+     ```
+
+   - 若是按照服务名ping
+
+     ```shell
+     root@1353d250cb2c:/usr/local/tomcat# ping tomcat82
+     ping: tomcat82: Temporary failure in name resolution
+     root@1353d250cb2c:/usr/local/tomcat# ping tomcat81
+     ping: tomcat81: Temporary failure in name resolution
+     ```
+
+2. 使用自定义网络
+
+   > 自定义桥接网络,自定义网络默认使用的是桥接网络bridge
+
+   1. 新建自定义网络
+
+      ```shell
+      [root@localhost ~]# docker network ls
+      NETWORK ID     NAME      DRIVER    SCOPE
+      dd462ddcb38f   bridge    bridge    local
+      dc463e83050b   host      host      local
+      f9d1acebf2b6   none      null      local
+      [root@localhost ~]# docker network create lambert_network
+      eac260e61ed4abc67a6fc9e6c80aaa2ba31baa86846f03516f141fb2f0f4efe4
+      [root@localhost ~]# docker network ls
+      NETWORK ID     NAME              DRIVER    SCOPE
+      dd462ddcb38f   bridge            bridge    local
+      dc463e83050b   host              host      local
+      eac260e61ed4   lambert_network   bridge    local
+      f9d1acebf2b6   none              null      local
+      ```
+
+   2. 新建的容器加入上一步新建的自定义网络
+
+      ```shell
+      [root@localhost ~]# docker run -d -p 8081:8080 --network lambert_network  --name tomcat81 billygoo/tomcat8-jdk8
+      e237a600a47dcc1cdb4ff78b4ef6c67e4f6875b7b60ee1d00fa698b6106fc520
+      [root@localhost ~]# docker run -d -p 8082:8080 --network lambert_network  --name tomcat82 billygoo/tomcat8-jdk8
+      5db28573abf8e0c367d190ef0ded688c217957ab687f68cdb0e8bf4ef6aa8ad2
+      ```
+
+   3. 互相ping测试
+
+      ```shell
+      [root@localhost ~]# docker exec -it tomcat81 bash
+      root@e237a600a47d:/usr/local/tomcat# ping tomcat82
+      PING tomcat82 (172.18.0.3) 56(84) bytes of data.
+      64 bytes from tomcat82.lambert_network (172.18.0.3): icmp_seq=1 ttl=64 time=0.119 ms
+      64 bytes from tomcat82.lambert_network (172.18.0.3): icmp_seq=2 ttl=64 time=0.062 ms
+      64 bytes from tomcat82.lambert_network (172.18.0.3): icmp_seq=3 ttl=64 time=0.113 ms
+      64 bytes from tomcat82.lambert_network (172.18.0.3): icmp_seq=4 ttl=64 time=0.048 ms
+      
+      [root@localhost ~]# docker exec -it tomcat82 bash
+      root@5db28573abf8:/usr/local/tomcat# ping tomcat81
+      PING tomcat81 (172.18.0.2) 56(84) bytes of data.
+      64 bytes from tomcat81.lambert_network (172.18.0.2): icmp_seq=1 ttl=64 time=0.032 ms
+      64 bytes from tomcat81.lambert_network (172.18.0.2): icmp_seq=2 ttl=64 time=0.046 ms
+      64 bytes from tomcat81.lambert_network (172.18.0.2): icmp_seq=3 ttl=64 time=0.044 ms
+      ```
+
+3. 问题结论
+
+   > 自定义网络本身就维护好了主机名和ip的对应关系（ip和域名都能通）
+
+# 十三、Docker-compose容器编排
+
+> Compose 是 Docker 公司推出的一个工具软件，可以管理多个 Docker 容器组成一个应用。你需要定义一个 YAML 格式的配置文件docker-compose.yml，`写好多个容器之间的调用关系`。然后，`只要一个命令，就能同时启动/关闭这些容器`
+
+## 1、Docker-compose能干嘛
+
+docker建议我们每一个容器中只运行一个服务,因为docker容器本身占用资源极少,所以最好是将每个服务单独的分割开来但是这样我们又面临了一个问题？
+
+如果我需要同时部署好多个服务,难道要每个服务单独写Dockerfile然后在构建镜像,构建容器,这样累都累死了,所以docker官方给我们提供了`docker-compose多服务部署的工具`
+
+例如要实现一个Web微服务项目，除了Web服务容器本身，往往还需要再加上后端的数据库mysql服务容器，redis服务器，注册中心eureka，甚至还包括负载均衡容器等等。。。。。。
+
+Compose允许用户通过一个单独的`docker-compose.yml`模板文件（YAML 格式）来定义`一组相关联的应用容器为一个项目（project）`。
+
+可以很容易地用一个配置文件定义一个多容器的应用，然后使用一条指令安装这个应用的所有依赖，完成构建。Docker-Compose 解决了容器与容器之间如何管理编排的问题。
+
+## 2、Docker-compose下载
+
+> 官网：https://docs.docker.com/compose/compose-file/compose-file-v3/
+
+> 官网下载：https://docs.docker.com/compose/install/
+
+> 安装步骤
+
+1. 安装Docker-componse
+
+   ```shell
+   curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+     % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                    Dload  Upload   Total   Spent    Left  Speed
+     0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+   100 12.1M  100 12.1M    0     0  2672k      0  0:00:04  0:00:04 --:--:-- 3430k
+   ```
+
+2. 开启执行权限
+
+   ```shell
+   chmod +x /usr/local/bin/docker-compose
+   ```
+
+3. 版本
+
+   ```shell
+   [root@localhost ~]# docker-compose --version
+   docker-compose version 1.29.2, build 5becea4c
+   ```
+
+> 卸载步骤
+
+```shell
+rm /usr/local/bin/docker-compose
+```
 
 
 
+## 3、Compose核心概念
+
+> 一文件（docker-compose.yml）+两要素
+
+### 3-1、两要素
+
+1. 服务（service）
+
+   一个个应用容器实例，比如订单微服务、库存微服务、mysql容器、nginx容器或者redis容器
+
+2. 工程（project）
+
+   由一组关联的应用容器组成的一个`完整业务单元`，在 docker-compose.yml 文件中定义。
+
+## 4、Compose使用的三个步骤
+
+1. 编写Dockerfile定义各个微服务应用并构建出对应的镜像文件
+2. 使用 docker-compose.yml 定义一个完整业务单元，安排好整体应用中的各个容器服务。
+3. 最后，执行docker-compose up命令 来启动并运行整个应用程序，完成一键部署上线
+
+## 5、Compose常用命令
+
+> docker-compose -h                           # 查看帮助
+> docker-compose up                           # 启动所有docker-compose服务
+> `docker-compose up -d                        # 启动所有docker-compose服务并后台运行`
+> `docker-compose down                         # 停止并删除容器、网络、卷、镜像。`
+> docker-compose exec yml里面的服务id           # 进入容器实例内部  
+>
+> docker-compose exec `docker-compose.yml文件中写的服务id` /bin/bash
+>
+> docker-compose ps                      # 展示当前docker-compose编排过的运行的所有容器
+>
+> docker-compose top                     # 展示当前docker-compose编排过的容器进程
+>
+> docker-compose logs  yml里面的服务id     # 查看容器输出日志
+> `docker-compose config     # 检查配置`
+> `docker-compose config -q  # 检查配置，有问题才有输出`
+> docker-compose restart   # 重启服务
+> docker-compose start     # 启动服务
+> docker-compose stop      # 停止服务
+
+## 6、Compose编排微服务
+
+### 6-1、改造升级微服务工程docker_boot
+
+1. SQL建库建表
+
+   ```sql
+    
+   CREATE TABLE `t_user` (
+     `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
+     `username` varchar(50) NOT NULL DEFAULT '' COMMENT '用户名',
+     `password` varchar(50) NOT NULL DEFAULT '' COMMENT '密码',
+     `sex` tinyint(4) NOT NULL DEFAULT '0' COMMENT '性别 0=女 1=男 ',
+     `deleted` tinyint(4) unsigned NOT NULL DEFAULT '0' COMMENT '删除标志，默认0不删除，1删除',
+     `update_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+     `create_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+     PRIMARY KEY (`id`)
+   ) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8 COMMENT='用户表'
+   ```
+
+2. pom
+
+   ```xml
+   <properties>
+           <java.version>1.8</java.version>
+           <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+           <maven.compiler.source>1.8</maven.compiler.source>
+           <maven.compiler.target>1.8</maven.compiler.target>
+           <junit.version>4.12</junit.version>
+           <log4j.version>1.2.17</log4j.version>
+           <lombok.version>1.16.18</lombok.version>
+           <mysql.version>5.1.47</mysql.version>
+           <druid.version>1.1.16</druid.version>
+           <mapper.version>4.1.5</mapper.version>
+           <mybatis.spring.boot.version>1.3.0</mybatis.spring.boot.version>
+       </properties>
+       <dependencies>
+           <!--guava Google 开源的 Guava 中自带的布隆过滤器-->
+           <dependency>
+               <groupId>com.google.guava</groupId>
+               <artifactId>guava</artifactId>
+               <version>23.0</version>
+           </dependency>
+           <!-- redisson -->
+           <dependency>
+               <groupId>org.redisson</groupId>
+               <artifactId>redisson</artifactId>
+               <version>3.13.4</version>
+           </dependency>
+           <!--SpringBoot通用依赖模块-->
+           <dependency>
+               <groupId>org.springframework.boot</groupId>
+               <artifactId>spring-boot-starter-web</artifactId>
+           </dependency>
+           <dependency>
+               <groupId>org.springframework.boot</groupId>
+               <artifactId>spring-boot-starter-actuator</artifactId>
+           </dependency>
+           <!--SpringBoot与Redis整合依赖-->
+           <dependency>
+               <groupId>org.springframework.boot</groupId>
+               <artifactId>spring-boot-starter-data-redis</artifactId>
+           </dependency>
+           <!--springCache-->
+           <dependency>
+               <groupId>org.springframework.boot</groupId>
+               <artifactId>spring-boot-starter-cache</artifactId>
+           </dependency>
+           <!--springCache连接池依赖包-->
+           <dependency>
+               <groupId>org.apache.commons</groupId>
+               <artifactId>commons-pool2</artifactId>
+           </dependency>
+           <!-- jedis -->
+           <dependency>
+               <groupId>redis.clients</groupId>
+               <artifactId>jedis</artifactId>
+               <version>3.1.0</version>
+           </dependency>
+           <!--Mysql数据库驱动-->
+           <dependency>
+               <groupId>mysql</groupId>
+               <artifactId>mysql-connector-java</artifactId>
+               <version>5.1.47</version>
+           </dependency>
+           <!--SpringBoot集成druid连接池-->
+           <dependency>
+               <groupId>com.alibaba</groupId>
+               <artifactId>druid-spring-boot-starter</artifactId>
+               <version>1.1.10</version>
+           </dependency>
+           <dependency>
+               <groupId>com.alibaba</groupId>
+               <artifactId>druid</artifactId>
+               <version>${druid.version}</version>
+           </dependency>
+           <!--mybatis和springboot整合-->
+           <dependency>
+               <groupId>org.mybatis.spring.boot</groupId>
+               <artifactId>mybatis-spring-boot-starter</artifactId>
+               <version>${mybatis.spring.boot.version}</version>
+           </dependency>
+           <!-- 添加springboot对amqp的支持 -->
+           <dependency>
+               <groupId>org.springframework.boot</groupId>
+               <artifactId>spring-boot-starter-amqp</artifactId>
+           </dependency>
+           <dependency>
+               <groupId>commons-codec</groupId>
+               <artifactId>commons-codec</artifactId>
+               <version>1.10</version>
+           </dependency>
+           <!--通用基础配置junit/devtools/test/log4j/lombok/hutool-->
+           <!--hutool-->
+           <dependency>
+               <groupId>cn.hutool</groupId>
+               <artifactId>hutool-all</artifactId>
+               <version>5.2.3</version>
+           </dependency>
+           <dependency>
+               <groupId>junit</groupId>
+               <artifactId>junit</artifactId>
+               <version>${junit.version}</version>
+           </dependency>
+           <dependency>
+               <groupId>org.springframework.boot</groupId>
+               <artifactId>spring-boot-devtools</artifactId>
+               <scope>runtime</scope>
+               <optional>true</optional>
+           </dependency>
+           <dependency>
+               <groupId>org.springframework.boot</groupId>
+               <artifactId>spring-boot-starter-test</artifactId>
+               <scope>test</scope>
+           </dependency>
+           <dependency>
+               <groupId>log4j</groupId>
+               <artifactId>log4j</artifactId>
+               <version>${log4j.version}</version>
+           </dependency>
+           <dependency>
+               <groupId>org.projectlombok</groupId>
+               <artifactId>lombok</artifactId>
+               <version>${lombok.version}</version>
+               <optional>true</optional>
+           </dependency>
+           <!--persistence-->
+           <dependency>
+               <groupId>javax.persistence</groupId>
+               <artifactId>persistence-api</artifactId>
+               <version>1.0.2</version>
+           </dependency>
+           <!--通用Mapper-->
+           <dependency>
+               <groupId>tk.mybatis</groupId>
+               <artifactId>mapper</artifactId>
+               <version>${mapper.version}</version>
+           </dependency>
+       </dependencies>
+   
+       <build>
+           <plugins>
+               <plugin>
+                   <groupId>org.springframework.boot</groupId>
+                   <artifactId>spring-boot-maven-plugin</artifactId>
+               </plugin>
+               <plugin>
+                   <groupId>org.apache.maven.plugins</groupId>
+                   <artifactId>maven-resources-plugin</artifactId>
+                   <version>3.1.0</version>
+               </plugin>
+           </plugins>
+       </build>
+   ```
+
+3. properties
+
+   ```properties
+   server.port=6001
+   # ========================alibaba.druid相关配置=====================
+   spring.datasource.type=com.alibaba.druid.pool.DruidDataSource
+   spring.datasource.driver-class-name=com.mysql.jdbc.Driver
+   spring.datasource.url=jdbc:mysql://10.1.53.169:3306/db2021?useUnicode=true&characterEncoding=utf-8&useSSL=false
+   spring.datasource.username=root
+   spring.datasource.password=123456
+   spring.datasource.druid.test-while-idle=false
+   # ========================redis相关配置=====================
+   spring.redis.database=0
+   spring.redis.host=10.1.53.169
+   spring.redis.port=6379
+   spring.redis.password=
+   spring.redis.lettuce.pool.max-active=8
+   spring.redis.lettuce.pool.max-wait=-1ms
+   spring.redis.lettuce.pool.max-idle=8
+   spring.redis.lettuce.pool.min-idle=0
+   # ========================mybatis相关配置===================
+   mybatis.mapper-locations=classpath:mapper/*.xml
+   mybatis.type-aliases-package=com.geek.entities
+   ```
+
+4. 主启动
+
+   ```java
+   @SpringBootApplication
+   @MapperScan("com.geek.mapper") //import tk.mybatis.spring.annotation.MapperScan;
+   public class DockerBootApplication
+   {
+       public static void main(String[] args)
+       {
+           SpringApplication.run(DockerBootApplication.class, args);
+       }
+   
+   }
+   ```
+
+5. 业务类
+
+   - config
+
+     ```java
+     @Configuration
+     @Slf4j
+     public class RedisConfig
+     {
+         /**
+          * @param lettuceConnectionFactory
+          * @return
+          *
+          * redis序列化的工具配置类，下面这个请一定开启配置
+          * 127.0.0.1:6379> keys *
+          * 1) "ord:102"  序列化过
+          * 2) "\xac\xed\x00\x05t\x00\aord:102"   野生，没有序列化过
+          */
+         @Bean
+         public RedisTemplate<String,Serializable> redisTemplate(LettuceConnectionFactory lettuceConnectionFactory)
+         {
+             RedisTemplate<String,Serializable> redisTemplate = new RedisTemplate<>();
+     
+             redisTemplate.setConnectionFactory(lettuceConnectionFactory);
+             //设置key序列化方式string
+             redisTemplate.setKeySerializer(new StringRedisSerializer());
+             //设置value的序列化方式json
+             redisTemplate.setValueSerializer(new GenericJackson2JsonRedisSerializer());
+     
+             redisTemplate.setHashKeySerializer(new StringRedisSerializer());
+             redisTemplate.setHashValueSerializer(new GenericJackson2JsonRedisSerializer());
+     
+             redisTemplate.afterPropertiesSet();
+     
+             return redisTemplate;
+         }
+     
+     }
+     ```
+
+   - entity
+
+     ```java
+     @Table(name = "t_user")
+     public class User
+     {
+         @Id
+         @GeneratedValue(generator = "JDBC")
+         private Integer id;
+     
+         /**
+          * 用户名
+          */
+         private String username;
+     
+         /**
+          * 密码
+          */
+         private String password;
+     
+         /**
+          * 性别 0=女 1=男 
+          */
+         private Byte sex;
+     
+         /**
+          * 删除标志，默认0不删除，1删除
+          */
+         private Byte deleted;
+     
+         /**
+          * 更新时间
+          */
+         @Column(name = "update_time")
+         private Date updateTime;
+     
+         /**
+          * 创建时间
+          */
+         @Column(name = "create_time")
+         private Date createTime;
+     
+         /**
+          * @return id
+          */
+         public Integer getId() {
+             return id;
+         }
+     
+         /**
+          * @param id
+          */
+         public void setId(Integer id) {
+             this.id = id;
+         }
+     
+         /**
+          * 获取用户名
+          *
+          * @return username - 用户名
+          */
+         public String getUsername() {
+             return username;
+         }
+     
+         /**
+          * 设置用户名
+          *
+          * @param username 用户名
+          */
+         public void setUsername(String username) {
+             this.username = username;
+         }
+     
+         /**
+          * 获取密码
+          *
+          * @return password - 密码
+          */
+         public String getPassword() {
+             return password;
+         }
+     
+         /**
+          * 设置密码
+          *
+          * @param password 密码
+          */
+         public void setPassword(String password) {
+             this.password = password;
+         }
+     
+         /**
+          * 获取性别 0=女 1=男 
+          *
+          * @return sex - 性别 0=女 1=男 
+          */
+         public Byte getSex() {
+             return sex;
+         }
+     
+         /**
+          * 设置性别 0=女 1=男 
+          *
+          * @param sex 性别 0=女 1=男 
+          */
+         public void setSex(Byte sex) {
+             this.sex = sex;
+         }
+     
+         /**
+          * 获取删除标志，默认0不删除，1删除
+          *
+          * @return deleted - 删除标志，默认0不删除，1删除
+          */
+         public Byte getDeleted() {
+             return deleted;
+         }
+     
+         /**
+          * 设置删除标志，默认0不删除，1删除
+          *
+          * @param deleted 删除标志，默认0不删除，1删除
+          */
+         public void setDeleted(Byte deleted) {
+             this.deleted = deleted;
+         }
+     
+         /**
+          * 获取更新时间
+          *
+          * @return update_time - 更新时间
+          */
+         public Date getUpdateTime() {
+             return updateTime;
+         }
+     
+         /**
+          * 设置更新时间
+          *
+          * @param updateTime 更新时间
+          */
+         public void setUpdateTime(Date updateTime) {
+             this.updateTime = updateTime;
+         }
+     
+         /**
+          * 获取创建时间
+          *
+          * @return create_time - 创建时间
+          */
+         public Date getCreateTime() {
+             return createTime;
+         }
+     
+         /**
+          * 设置创建时间
+          *
+          * @param createTime 创建时间
+          */
+         public void setCreateTime(Date createTime) {
+             this.createTime = createTime;
+         }
+     }
+     ```
+
+   - mapper
+
+     ```java
+     public interface UserMapper extends Mapper<User> {
+     }
+     ```
+
+     UserMapper.xml
+
+     ```xml
+     <?xml version="1.0" encoding="UTF-8"?>
+     <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+     <mapper namespace="com.geek.mapper.UserMapper">
+       <resultMap id="BaseResultMap" type="com.geek.entities.User">
+         <!--
+           WARNING - @mbg.generated
+         -->
+         <id column="id" jdbcType="INTEGER" property="id" />
+         <result column="username" jdbcType="VARCHAR" property="username" />
+         <result column="password" jdbcType="VARCHAR" property="password" />
+         <result column="sex" jdbcType="TINYINT" property="sex" />
+         <result column="deleted" jdbcType="TINYINT" property="deleted" />
+         <result column="update_time" jdbcType="TIMESTAMP" property="updateTime" />
+         <result column="create_time" jdbcType="TIMESTAMP" property="createTime" />
+       </resultMap>
+     </mapper>
+     ```
+
+   - service
+
+     ```java
+     @Service
+     @Slf4j
+     public class UserService {
+     
+         public static final String CACHE_KEY_USER = "user:";
+     
+         @Resource
+         private UserMapper userMapper;
+         @Resource
+         private RedisTemplate redisTemplate;
+     
+         /**
+          * addUser
+          * @param user
+          */
+         public void addUser(User user)
+         {
+             //1 先插入mysql并成功
+             int i = userMapper.insertSelective(user);
+     
+             if(i > 0)
+             {
+                 //2 需要再次查询一下mysql将数据捞回来并ok
+                 user = userMapper.selectByPrimaryKey(user.getId());
+                 //3 将捞出来的user存进redis，完成新增功能的数据一致性。
+                 String key = CACHE_KEY_USER+user.getId();
+                 redisTemplate.opsForValue().set(key,user);
+             }
+         }
+     
+         /**
+          * findUserById
+          * @param id
+          * @return
+          */
+         public User findUserById(Integer id)
+         {
+             User user = null;
+             String key = CACHE_KEY_USER+id;
+     
+             //1 先从redis里面查询，如果有直接返回结果，如果没有再去查询mysql
+             user = (User) redisTemplate.opsForValue().get(key);
+     
+             if(user == null)
+             {
+                 //2 redis里面无，继续查询mysql
+                 user = userMapper.selectByPrimaryKey(id);
+                 if(user == null)
+                 {
+                     //3.1 redis+mysql 都无数据
+                     //你具体细化，防止多次穿透，我们规定，记录下导致穿透的这个key回写redis
+                     return user;
+                 }else{
+                     //3.2 mysql有，需要将数据写回redis，保证下一次的缓存命中率
+                     redisTemplate.opsForValue().set(key,user);
+                 }
+             }
+             return user;
+         }
+     }
+     ```
+
+   - controller
+
+     ```java
+     @RestController
+     @Slf4j
+     public class UserController
+     {
+         @Resource
+         private UserService userService;
+     
+         @RequestMapping(value = "/user/add",method = RequestMethod.POST)
+         public void addUser()
+         {
+             for (int i = 1; i <=3; i++) {
+                 User user = new User();
+     
+                 user.setUsername("zzyy"+i);
+                 user.setPassword(IdUtil.simpleUUID().substring(0,6));
+                 user.setSex((byte) new Random().nextInt(2));
+     
+                 userService.addUser(user);
+             }
+         }
+     
+         @RequestMapping(value = "/user/find/{id}",method = RequestMethod.GET)
+         public User findUserById(@PathVariable Integer id)
+         {
+             return userService.findUserById2(id);
+         }
+     }
+      
+     ```
+
+6. 将微服务打包jar包并上传到Linux服务器/mydocker目录
+
+7. 编写Dockerfile
+
+   ```dockerfile
+   FROM java:8
+   
+   MAINTAINER lambert
+   
+   VOLUME /tmp
+   
+   ADD docker_boot-0.0.1-SNAPSHOT.jar lambert_docker.jar
+   
+   RUN bash -c 'touch /lambert_docker.jar'
+   
+   ENTRYPOINT ["java","-jar","/lambert_docker.jar"]
+   
+   EXPOSE 6001
+   ```
+
+8. 构建镜像
+
+   ```shell
+   [root@localhost mydocker]# docker build -t lambert_docker:1.1 .
+   ```
+
+9. 查看镜像
+
+   ```shell
+   [root@localhost mydocker]# docker images
+   REPOSITORY                                                   TAG          IMAGE ID       CREATED         SIZE
+   lambert_docker                                               1.1          11c2b0c144aa   3 hours ago     754MB
+   ```
+
+### 6-2、不用Compose
+
+#### 6-2-1、单独的mysql容器实例
+
+1. 新建mysql容器实例
+
+   ```shell
+   [root@localhost zzyyuse]# docker run -p 3306:3306 --name mysql57 --privileged=true -v /zzyyuse/mysql/conf:/etc/mysql/conf.d -v /zzyyuse/mysql/logs:/logs -v /zzyyuse/mysql/data:/var/lib/mysql -e MYSQL_ROOT_PASSWORD=123456 -d mysql:5.7
+   90581e9c3105b92982c56a12c306fd36a4ef52a0c4a4617f0e9fca53752ad5bc
+   ```
+
+2. 进入mysql容器实例并新建库db2021+新建表t_user
+
+   ```shell
+   [root@localhost zzyyuse]# docker exec -it mysql57 /bin/bash
+   root@90581e9c3105:/# mysql -uroot -p
+   Enter password:
+   mysql> create database db2021;
+   mysql> use db2021;
+   mysql> CREATE TABLE `t_user` (
+     `id` INT(10) UNSIGNED NOT NULL AUTO_INCREMENT,
+     `username` VARCHAR(50) NOT NULL DEFAULT '' COMMENT '用户名',
+     `password` VARCHAR(50) NOT NULL DEFAULT '' COMMENT '密码',
+     `sex` TINYINT(4) NOT NULL DEFAULT '0' COMMENT '性别 0=女 1=男 ',
+     `deleted` TINYINT(4) UNSIGNED NOT NULL DEFAULT '0' COMMENT '删除标志，默认0不删除，1删除',
+     `update_time` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+     `create_time` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+     PRIMARY KEY (`id`)
+   ) ENGINE=INNODB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4 COMMENT='用户表';
+   ```
+
+#### 6-2-2、单独的redis容器实例
+
+```shell
+[root@localhost /]# docker run  -p 6379:6379 --name redis608 --privileged=true -v /app/redis/redis.conf:/etc/redis/redis.conf -v /app/redis/data:/data -d redis redis-server /etc/redis/redis.conf
+a234024de7d0df352162e4293f27d532c23d7d3a167e4d3579e54328d3239f23
+```
+
+#### 6-2-3、微服务工程
+
+```shell
+[root@localhost redis]# docker run -d -p 6001:6001 lambert_docker:1.1
+```
+
+#### 6-2-4、三个容器实例依次启动成功
+
+<img src="README.assets/image-20220523201740626.png" alt="image-20220523201740626" style="zoom: 80%;" /> 
+
+### 6-3、postman测试
+
+<img src="README.assets/image-20220523203227664.png" alt="image-20220523203227664" style="zoom: 80%;" /> 
+
+> redis
+
+ <img src="README.assets/image-20220523203335410.png" alt="image-20220523203335410" style="zoom:80%;" />
+
+### 6-4、上面成功了，有哪些问题?
+
+1. 先后顺序要求固定，先mysql+redis才能微服务访问成功
+2. run命令太多
+3. 容器间的启停或宕机，有可能导致IP地址对应的容器实例变化，映射出错，要么生产IP写死(可以但是不推荐)，要么通过服务调用
+
+### 6-5、使用Compose
+
+1. docker-compose.yml
+
+   ```yaml
+   version: "3"
+    
+   services:
+     microService:
+       image: zzyy_docker:1.6
+       container_name: ms01
+       ports:
+         - "6001:6001"
+       volumes:
+         - /app/microService:/data
+       networks: 
+         - atguigu_net 
+       depends_on: 
+         - redis
+         - mysql
+    
+     redis:
+       image: redis:6.0.8
+       ports:
+         - "6379:6379"
+       volumes:
+         - /app/redis/redis.conf:/etc/redis/redis.conf
+         - /app/redis/data:/data
+       networks: 
+         - atguigu_net
+       command: redis-server /etc/redis/redis.conf
+    
+     mysql:
+       image: mysql:5.7
+       environment:
+         MYSQL_ROOT_PASSWORD: '123456'
+         MYSQL_ALLOW_EMPTY_PASSWORD: 'no'
+         MYSQL_DATABASE: 'db2021'
+         MYSQL_USER: 'zzyy'
+         MYSQL_PASSWORD: 'zzyy123'
+       ports:
+          - "3306:3306"
+       volumes:
+          - /app/mysql/db:/var/lib/mysql
+          - /app/mysql/conf/my.cnf:/etc/my.cnf
+          - /app/mysql/init:/docker-entrypoint-initdb.d
+       networks:
+         - atguigu_net
+       command: --default-authentication-plugin=mysql_native_password #解决外部无法访问
+    
+   networks: 
+      atguigu_net: 
+   ```
+
+2. 第二次修改微服务工程docker_boot
+
+   1. 修改yml，通过服务名访问，IP无关
+
+      ```properties
+      server.port=6001
+      
+      # ========================alibaba.druid相关配置=====================
+      spring.datasource.type=com.alibaba.druid.pool.DruidDataSource
+      spring.datasource.driver-class-name=com.mysql.jdbc.Driver
+      #spring.datasource.url=jdbc:mysql://192.168.111.169:3306/db2021?useUnicode=true&characterEncoding=utf-8&useSSL=false
+      spring.datasource.url=jdbc:mysql://mysql:3306/db2021?useUnicode=true&characterEncoding=utf-8&useSSL=false
+      spring.datasource.username=root
+      spring.datasource.password=123456
+      spring.datasource.druid.test-while-idle=false
+      
+      # ========================redis相关配置=====================
+      spring.redis.database=0
+      #spring.redis.host=192.168.111.169
+      spring.redis.host=redis
+      spring.redis.port=6379
+      spring.redis.password=
+      spring.redis.lettuce.pool.max-active=8
+      spring.redis.lettuce.pool.max-wait=-1ms
+      spring.redis.lettuce.pool.max-idle=8
+      spring.redis.lettuce.pool.min-idle=0
+      
+      # ========================mybatis相关配置===================
+      mybatis.mapper-locations=classpath:mapper/*.xml
+      mybatis.type-aliases-package=com.atguigu.docker.entities
+      
+      # ========================swagger=====================
+      spring.swagger2.enabled=true
+      ```
+
+   2. mvn package命令将微服务形成新的jar包并上传到Linux服务器/mydocker目录下
+
+   3. 编写Dockerfile
+
+      ```dockerfile
+      # 基础镜像使用java
+      FROM java:8
+      # 作者
+      MAINTAINER zzyy
+      # VOLUME 指定临时文件目录为/tmp，在主机/var/lib/docker目录下创建了一个临时文件并链接到容器的/tmp
+      VOLUME /tmp
+      # 将jar包添加到容器中并更名为zzyy_docker.jar
+      ADD docker_boot-0.0.1-SNAPSHOT.jar zzyy_docker.jar
+      # 运行jar包
+      RUN bash -c 'touch /zzyy_docker.jar'
+      ENTRYPOINT ["java","-jar","/zzyy_docker.jar"]
+      #暴露6001端口作为微服务
+      EXPOSE 6001
+      ```
+
+   4. 构建镜像
+
+      ```shell
+      docker build -t zzyy_docker:1.6 .
+      ```
+
+3. 执行 docker-compose up 或者 执行 docker-compose up -d
+
+   ![image-20220606115434899](README.assets/image-20220606115434899.png) 
+
+   <img src="README.assets/image-20220606115440735.png" alt="image-20220606115440735" style="zoom: 80%;" /> 
+
+4. 进入mysql容器实例并新建库db2021+新建表t_user
+
+   ```shell
+   docker exec -it 容器实例id /bin/bash
+   mysql -uroot -p
+   create database db2021;
+   use db2021;
+   CREATE TABLE `t_user` (
+     `id` INT(10) UNSIGNED NOT NULL AUTO_INCREMENT,
+     `username` VARCHAR(50) NOT NULL DEFAULT '' COMMENT '用户名',
+     `password` VARCHAR(50) NOT NULL DEFAULT '' COMMENT '密码',
+     `sex` TINYINT(4) NOT NULL DEFAULT '0' COMMENT '性别 0=女 1=男 ',
+     `deleted` TINYINT(4) UNSIGNED NOT NULL DEFAULT '0' COMMENT '删除标志，默认0不删除，1删除',
+     `update_time` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+     `create_time` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+     PRIMARY KEY (`id`)
+   ) ENGINE=INNODB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4 COMMENT='用户表';
+   ```
+
+# 十四、Docker轻量级可视化工具Portainer
+
+> Portainer 是一款轻量级的应用，它提供了图形化界面，用于方便地管理Docker环境，包括单机环境和集群环境。
+
+## 1、安装
+
+官网：https://www.portainer.io/
+
+文档：https://docs.portainer.io/v/ce-2.9/start/install/server/docker/linux
+
+1. docker命令安装
+
+   ```shell
+   docker run -d -p 8000:8000 -p 9000:9000 --name portainer     --restart=always     -v /var/run/docker.sock:/var/run/docker.sock     -v portainer_data:/data     portainer/portainer
+   ```
+
+2. 第一次登录需创建admin，访问地址：xxx.xxx.xxx.xxx:9000
+
+   用户名，直接用默认admin,密码记得8位，随便你写
+
+   <img src="README.assets/image-20220606120120369.png" alt="image-20220606120120369" style="zoom: 67%;" /> 
+
+3. 设置admin用户和密码后首次登陆
+
+   <img src="README.assets/image-20220606120212400.png" alt="image-20220606120212400" style="zoom: 80%;" /> 
+
+4. 选择local选项卡后本地docker详细信息展示
+
+   <img src="README.assets/image-20220606120235973.png" alt="image-20220606120235973" style="zoom: 67%;" /> 
+
+# 十五、Docker容器监控之
+CAdvisor+InfluxDB+Granfana
+
+## 1、原生命令
+
+1. 操作：
+
+   <img src="README.assets/image-20220606120442898.png" alt="image-20220606120442898" style="zoom: 80%;" /> 
+
+   docker stats命令的结果：
+
+   <img src="README.assets/image-20220606120454257.png" alt="image-20220606120454257" style="zoom:80%;" /> 
+
+2. 问题
+
+   通过docker stats命令可以很方便的看到当前宿主机上所有容器的CPU,内存以及网络流量等数据，一般小公司够用了。。。。
+
+   但是，docker stats统计结果只能是当前宿主机的全部容器，数据资料是实时的，没有地方存储、没有健康指标过线预警等功能
+
+
+## 2、是什么
+
+> CAdvisor监控收集+InfluxDB存储数据+Granfana展示图表
+
+1. CAdvisor
+
+   <img src="README.assets/image-20220606120619373.png" alt="image-20220606120619373" style="zoom: 80%;" /> 
+
+2. InfluxDB
+
+   ![image-20220606120630481](README.assets/image-20220606120630481.png) 
+
+3. Granfana
+
+   <img src="README.assets/image-20220606120642939.png" alt="image-20220606120642939" style="zoom:80%;" /> 
+
+<img src="README.assets/image-20220606120655998.png" alt="image-20220606120655998" style="zoom:80%;" />
 
 
 
+## 3、compose容器编排，一套带走
 
+### 3-1、新建目录
 
+![image-20220606120735710](README.assets/image-20220606120735710.png) 
 
+### 3-2、新建3件套组合的docker-compose.yml
+
+```yaml
+version: '3.1'
+ 
+volumes:
+  grafana_data: {}
+ 
+services:
+ influxdb:
+  image: tutum/influxdb:0.9
+  restart: always
+  environment:
+    - PRE_CREATE_DB=cadvisor
+  ports:
+    - "8083:8083"
+    - "8086:8086"
+  volumes:
+    - ./data/influxdb:/data
+ 
+ cadvisor:
+  image: google/cadvisor
+  links:
+    - influxdb:influxsrv
+  command: -storage_driver=influxdb -storage_driver_db=cadvisor -storage_driver_host=influxsrv:8086
+  restart: always
+  ports:
+    - "8080:8080"
+  volumes:
+    - /:/rootfs:ro
+    - /var/run:/var/run:rw
+    - /sys:/sys:ro
+    - /var/lib/docker/:/var/lib/docker:ro
+ 
+ grafana:
+  user: "104"
+  image: grafana/grafana
+  user: "104"
+  restart: always
+  links:
+    - influxdb:influxsrv
+  ports:
+    - "3000:3000"
+  volumes:
+    - grafana_data:/var/lib/grafana
+  environment:
+    - HTTP_USER=admin
+    - HTTP_PASS=admin
+    - INFLUXDB_HOST=influxsrv
+    - INFLUXDB_PORT=8086
+    - INFLUXDB_NAME=cadvisor
+    - INFLUXDB_USER=root
+    - INFLUXDB_PASS=root
+```
+
+### 3-3、启动docker-compose文件
+
+![image-20220606120842708](README.assets/image-20220606120842708.png) 
+
+![image-20220606120847907](README.assets/image-20220606120847907.png) 
+
+### 3-4、查看三个服务容器是否启动
+
+<img src="README.assets/image-20220606120902732.png" alt="image-20220606120902732" style="zoom:80%;" /> 
+
+### 3-5、测试
+
+1. 浏览cAdvisor收集服务，http://ip:8080/
+
+   <img src="README.assets/image-20220606120941368.png" alt="image-20220606120941368" style="zoom: 80%;" /> 
+
+   cadvisor也有基础的图形展现功能，这里主要用它来作数据采集
+
+2. 浏览influxdb存储服务，http://ip:8083/
+
+3. 浏览grafana展现服务，http://ip:3000
+
+   > ip+3000端口的方式访问,默认帐户密码（admin/admin）
+
+   <img src="README.assets/image-20220606121022114.png" alt="image-20220606121022114" style="zoom:80%;" />
+
+   1. 配置数据源
+
+      <img src="README.assets/image-20220606121043858.png" alt="image-20220606121043858" style="zoom: 80%;" />  
+
+   2. 选择influxdb数据源
+
+      ![image-20220606121101046](README.assets/image-20220606121101046.png) 
+
+   3. 配置细节
+
+      ![image-20220606121119098](README.assets/image-20220606121119098.png) 
+
+      <img src="README.assets/image-20220606121126204.png" alt="image-20220606121126204" style="zoom:80%;" /> 
+
+      <img src="README.assets/image-20220606121133330.png" alt="image-20220606121133330" style="zoom:80%;" /> 
+
+   4. 配置面板panel
+
+      <img src="README.assets/image-20220606121205675.png" alt="image-20220606121205675" style="zoom:67%;" /> 
+
+      <img src="README.assets/image-20220606121212333.png" alt="image-20220606121212333" style="zoom: 80%;" /> 
+
+      <img src="README.assets/image-20220606121231137.png" alt="image-20220606121231137" style="zoom: 67%;" /> 
+
+      <img src="README.assets/image-20220606121248770.png" alt="image-20220606121248770" style="zoom:80%;" />
+
+      <img src="README.assets/image-20220606121257220.png" alt="image-20220606121257220"  /> 
+
+      ![image-20220606121308751](README.assets/image-20220606121308751.png) 
+
+到这里cAdvisor+InfluxDB+Grafana容器监控系统就部署完成了
 
 
 
